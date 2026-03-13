@@ -4,7 +4,7 @@ import { classifyConsultationType, consultationTypeCandidates, findSimilarCases,
 import { isSpeechRecognitionAvailable, startSpeechRecognition } from './voice.js';
 
 const state = {
-  records: [],
+  records: loadRecords(),
   currentForm: createEmptyRecord(),
   selectedRecordId: null,
   generatedAiOutput: null,
@@ -298,7 +298,7 @@ function attachMainEvents() {
     renderMainPage();
   });
 
-  document.querySelector('#saveBtn')?.addEventListener('click', async () => {
+  document.querySelector('#saveBtn')?.addEventListener('click', () => {
     const record = {
       ...state.currentForm,
       id: crypto.randomUUID(),
@@ -309,14 +309,10 @@ function attachMainEvents() {
       aiOutput: state.generatedAiOutput || state.currentForm.aiOutput,
     };
     state.records.unshift(record);
-    try {
-      await saveRecords(state.records);
-      state.selectedRecordId = record.id;
-      window.alert('Google Driveに保存しました');
-      renderMainPage();
-    } catch (error) {
-      window.alert(`保存失敗: ${error.message || error}`);
-    }
+    saveRecords(state.records);
+    state.selectedRecordId = record.id;
+    window.alert('相談記録を保存しました。');
+    renderMainPage();
   });
 
   document.querySelector('#clearBtn')?.addEventListener('click', () => {
@@ -417,8 +413,8 @@ function renderImportPage() {
       <div class="import-grid">
         <label class="full"><span>議事録テキスト貼り付け</span><textarea id="rawImportText" rows="8" placeholder="ここに議事録を貼り付けるとキューに追加されます"></textarea></label>
         <label><span>ファイルアップロード（txt / json / csv）</span><input type="file" id="textFileInput" accept=".txt,.json,.csv" multiple /></label>
-        <label><span>PDF/Word（添付アップロード）</span><input type="file" disabled /><small class="muted">対応は index.html の本番版で有効です</small></label>
-        <label><span>音声ファイル（添付アップロード）</span><input type="file" disabled /><small class="muted">対応は index.html の本番版で有効です</small></label>
+        <label><span>PDF/Word（将来対応）</span><input type="file" disabled /><small class="muted">現在未対応です</small></label>
+        <label><span>音声ファイル（将来対応）</span><input type="file" disabled /><small class="muted">現在未対応です</small></label>
       </div>
       <div class="button-row">
         <button id="addTextImportBtn" class="primary">テキストを取り込みキューへ追加</button>
@@ -669,7 +665,7 @@ function attachImportEvents() {
     renderImportPage();
   });
 
-  document.querySelector('#saveImportBtn')?.addEventListener('click', async () => {
+  document.querySelector('#saveImportBtn')?.addEventListener('click', () => {
     updateCurrentImportFromForm();
     const item = getCurrentImportItem();
     if (!item) return;
@@ -692,20 +688,13 @@ function attachImportEvents() {
     }
 
     state.records.unshift(record);
-    try {
-      await saveRecords(state.records);
-      item.status = 'saved';
-      item.errorMessage = '';
-      state.selectedRecordId = record.id;
-      window.alert('Google Driveに保存しました');
-      renderImportPage();
-      renderMainPage();
-    } catch (error) {
-      item.status = 'error';
-      item.errorMessage = `保存失敗: ${error.message || error}`;
-      window.alert(item.errorMessage);
-      renderImportPage();
-    }
+    saveRecords(state.records);
+    item.status = 'saved';
+    item.errorMessage = '';
+    state.selectedRecordId = record.id;
+    window.alert('取り込み記録を保存しました。');
+    renderImportPage();
+    renderMainPage();
   });
 }
 
@@ -722,16 +711,6 @@ function escapeHtml(str) {
     .replaceAll("'", '&#039;');
 }
 
-async function bootstrap() {
-  initNavigation();
-  try {
-    state.records = await loadRecords();
-  } catch (error) {
-    window.alert(`Drive読込失敗: ${error.message || error}`);
-    state.records = [];
-  }
-  renderMainPage();
-  renderImportPage();
-}
-
-bootstrap();
+initNavigation();
+renderMainPage();
+renderImportPage();
