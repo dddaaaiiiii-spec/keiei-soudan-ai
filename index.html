@@ -25,5 +25,20 @@
     </template>
 
     <script type="module" src="src/main.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+
+<div id="g_id_onload"
+data-client_id="611836615589-2frs69tns3q77dbf0a4f7fuikgc307hb.apps.googleusercontent.com"
+data-callback="handleCredentialResponse">
+</div>
+
+<div class="g_id_signin" data-type="standard"></div>
+
+<script>
+function handleCredentialResponse(response) {
+  localStorage.setItem("login_token", response.credential);
+  alert("ログインしました");
+}
+</script>
   </body>
 </html>
