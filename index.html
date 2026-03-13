@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>経営相談AI（Google Drive保存版）</title>
+  <style>
+    :root { --bg:#f3f5f8; --card:#fff; --line:#d8dde6; --text:#1f2937; --muted:#5b6472; --primary:#225ea8; --warn:#b45309; --ok:#166534; }
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font-family:'Segoe UI',Meiryo,sans-serif}
+    .topbar{position:sticky;top:0;z-index:10;background:#1f3a5f;color:#fff;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+    .tabs button{margin-left:8px;border:1px solid #8aa4c3;background:transparent;color:#fff;border-radius:8px;padding:7px 10px;cursor:pointer}
+    .tabs .active{background:#fff;color:#1f3a5f}
+    .auth-row{display:flex;align-items:center;gap:8px;font-size:12px;flex-wrap:wrap}
+    main{padding:14px}.page{display:none}.page.active{display:block}.hidden{display:none!important}
+    .layout{display:grid;grid-template-columns:1.2fr 1fr;gap:12px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:12px}
+    h2,h3{margin:0 0 8px}.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.full{grid-column:1/-1}
+    label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)} input,textarea,select,button{font:inherit}
+    input,textarea,select{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px;background:#fff}
+    textarea{min-height:100px;resize:vertical}.btns{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+    button{border:1px solid var(--line);border-radius:8px;padding:8px 12px;cursor:pointer;background:#f8fafc}
+    .primary{background:var(--primary);color:#fff;border-color:var(--primary)}
+    .mini{border:1px solid var(--line);border-radius:10px;padding:10px;background:#fbfdff;margin-bottom:8px}
+    .chip{display:inline-block;padding:3px 8px;border-radius:999px;background:#e3edf9;border:1px solid #b8cee8;font-size:12px;margin:0 4px 4px 0}
+    .ok{color:var(--ok);font-weight:600}.warn{color:var(--warn);font-weight:600}.muted{color:var(--muted)}
+    table{width:100%;border-collapse:collapse;font-size:13px} th,td{border-bottom:1px solid var(--line);padding:7px;text-align:left;vertical-align:top}
+    tr:hover{background:#f4f9ff;cursor:pointer}
+    #loginGate{max-width:760px;margin:26px auto}
+    @media (max-width:1100px){.layout{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<header class="topbar">
+  <strong>経営相談AI（Google Drive保存版）</strong>
+  <div class="tabs hidden" id="tabs"><button id="tabMain" class="active">主ページ</button><button id="tabImport">蓄積ページ</button></div>
+  <div class="auth-row"><span id="authStatus">ログイン未確認</span><button id="loginBtn" class="primary">Googleログイン</button><button id="logoutBtn" class="hidden">ログアウト</button></div>
+</header>
+
+<section id="loginGate" class="card">
+  <h2>ログインが必要です</h2>
+  <p>Googleログイン後、Google Driveの以下に保存します。</p>
+  <ul><li><code>keiei-soudan-ai-data/consultations.json</code></li><li><code>keiei-soudan-ai-files/</code></li></ul>
+  <p id="gateMessage" class="muted">右上の「Googleログイン」を押してください。</p>
+</section>
+
+<main id="appRoot" class="hidden">
+  <section id="mainPage" class="page active"></section>
+  <section id="importPage" class="page"></section>
+</main>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://apis.google.com/js/api.js" async defer></script>
+<script>
+(() => {
+  const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com';
+  const allowedUsers = ['あなたのGmail'];
+  const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive';
+  const DRIVE_DISCOVERY = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
+
+  const TYPE_CANDIDATES = ['集客','販路開拓','値上げ','新商品開発','ブランディング','SNS運用','リピート対策','営業改善','資金繰り','人手不足','DX','その他'];
+  const ISSUE_TAGS = ['集客','販路開拓','値上げ','新商品','SNS','リピート','ブランディング','価格設定','人手不足','資金繰り','営業','DX'];
+  const ACTION_TAGS = ['Instagram','チラシ','LP','EC','イベント','BtoB提案','商品改善','導線改善','値上げ訴求','ターゲット再設定'];
+
+  const state = {
+    accessToken: sessionStorage.getItem('gdrive_access_token') || '',
+    userEmail: sessionStorage.getItem('gdrive_user_email') || '',
+    records: [],
+    form: emptyRecord(),
+    aiOutput: null,
+    similar: [],
+    selectedId: null,
+    importText: '',
+    saveDebug: '',
+    filters: { keyword:'', industry:'', issueTag:'' },
+    drive: { dataFolderId:'', filesFolderId:'', consultationsFileId:'' },
+    tokenClient: null, gapiReady: false, gisReady: false,
+  };
+
+  const qs = (s) => document.querySelector(s);
+  const esc = (s) => String(s ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
+  const chips = (arr=[]) => arr.filter(Boolean).map(t=>`<span class="chip">${esc(t)}</span>`).join(' ');
+  const kw = (t) => [...new Set((t||'').replace(/[\n、。,.]/g,' ').split(/\s+/).filter(x=>x.length>=2))];
+
+  function emptyRecord(){
+    return {
+      id: crypto.randomUUID(), sourceType:'manual', consultationDate:new Date().toISOString().slice(0,10),
+      clientName:'', companyName:'', industry:'', consultationType:'その他', consultationDetails:'',
+      currentIssues:'', desiredDirection:'', proposalSummary:'', nextActions:'', rawText:'',
+      tags:{industryTags:[], issueTags:[], actionTags:[], resultTags:[]},
+      aiOutput:{consultationSummary:''}, attachments:[], createdAt:new Date().toISOString()
+    };
+  }
+
+  function classifyConsultationType(input){
+    const t=`${input.consultationDetails} ${input.currentIssues} ${input.desiredDirection}`;
+    const rules=[['SNS運用',['SNS','Instagram']],['リピート対策',['リピート','再来店']],['販路開拓',['販路','BtoB']],['値上げ',['値上げ','価格改定']],['新商品開発',['新商品','開発']],['ブランディング',['ブランド','差別化']],['営業改善',['営業','商談']],['資金繰り',['資金繰り','融資']],['人手不足',['人手不足','採用']],['DX',['DX','デジタル']],['集客',['集客','来店','問い合わせ']]];
+    for(const [type,keys] of rules){ if(keys.some(k=>t.includes(k))) return type; }
+    return 'その他';
+  }
+
+  function generateTags(input){
+    const text=`${input.consultationDetails} ${input.currentIssues} ${input.industry}`;
+    return {
+      industryTags: input.industry?[input.industry]:[],
+      issueTags: ISSUE_TAGS.filter(x=>text.includes(x)),
+      actionTags: ACTION_TAGS.filter(x=>text.includes(x)),
+      resultTags: []
+    };
+  }
+
+  function generateConsultationAdvice(input, records=[]){
+    const similar = findSimilarCases({ ...input, id:'__temp__', tags: input.tags || generateTags(input), consultationType: input.consultationType || classifyConsultationType(input) }, records).slice(0,3);
+    const similarHint = similar.length
+      ? `過去事例${similar.length}件を参照（${similar.map(x=>x.record.companyName||'無名').join(' / ')}）。`
+      : '参照可能な過去事例がないため、入力情報のみで整理。';
+    return {
+      situationSummary:`${input.companyName||'対象企業'}は${input.industry||'未設定業種'}。課題は${input.currentIssues||'要整理'}。${similarHint}`,
+      consultationSummary:`${input.consultationDetails||'相談内容'}を基に、今すぐ施策と中期施策を整理。${similar.length?`類似上位: ${similar.map(s=>`${s.score}点`).join(' / ')}`:''}`.trim()
+    };
+  }
+
+  function explainReason(c){
+    const r=[]; if(c.type) r.push(`相談タイプが${c.type}で一致`); if(c.sameIndustry) r.push(`同じ${c.industry}業`);
+    if(c.issue.length) r.push(`課題タグが${c.issue.join('・')}で一致`); if(c.action.length) r.push(`施策タグが${c.action.join('・')}で一致`); if(c.key.length) r.push(`キーワード「${c.key.slice(0,3).join('・')}」が近い`);
+    return r.join('、') || '相談内容に共通点があります';
+  }
+
+  function findSimilarCases(current, records){
+    const ck=kw(`${current.consultationDetails} ${current.currentIssues}`);
+    return records.filter(r=>r.id!==current.id).map(r=>{
+      let score=0; const sameType=current.consultationType&&current.consultationType===r.consultationType; if(sameType) score+=20;
+      const sameIndustry=current.industry&&current.industry===r.industry; if(sameIndustry) score+=20;
+      const issue=(r.tags?.issueTags||[]).filter(t=>(current.tags?.issueTags||[]).includes(t)); score += Math.min(20, issue.length*10);
+      const action=(r.tags?.actionTags||[]).filter(t=>(current.tags?.actionTags||[]).includes(t)); score += Math.min(20, action.length*10);
+      const key=ck.filter(k=>kw(`${r.consultationDetails} ${r.currentIssues}`).includes(k)); score += Math.min(20, key.length*3);
+      return { record:r, score:Math.min(100,Math.round(score)), reason:explainReason({type:sameType?r.consultationType:'', sameIndustry, industry:r.industry, issue, action, key}), ts:new Date(r.consultationDate||0).getTime()||0 };
+    }).sort((a,b)=>b.score-a.score || b.ts-a.ts).slice(0,5);
+  }
+
+  function setStatus(msg, cls='') { const el=qs('#authStatus'); el.textContent=msg; el.className=cls; }
+  function setDebug(msg, ok=false){ state.saveDebug = `${new Date().toLocaleString()} : ${msg}`; const el=qs('#saveDebug'); if(el){ el.textContent=state.saveDebug; el.className=ok?'ok':'warn'; } }
+
+  window.addEventListener('load', () => {
+    qs('#loginBtn').onclick=requestLogin; qs('#logoutBtn').onclick=logout;
+    qs('#tabMain').onclick=()=>switchPage('main'); qs('#tabImport').onclick=()=>switchPage('import');
+
+    if(window.gapi) gapi.load('client', async ()=>{ await gapi.client.init({ discoveryDocs:[DRIVE_DISCOVERY] }); state.gapiReady=true; maybeRestoreSession(); });
+
+    const timer=setInterval(()=>{ if(window.google?.accounts?.oauth2){ clearInterval(timer); state.tokenClient=google.accounts.oauth2.initTokenClient({ client_id:GOOGLE_CLIENT_ID, scope:DRIVE_SCOPE, callback:async(resp)=>{ if(resp.error){ qs('#gateMessage').textContent=`ログイン失敗: ${resp.error}`; return; } state.accessToken=resp.access_token; await afterTokenObtained(); } }); state.gisReady=true; maybeRestoreSession(); } },100);
+  });
+
+  function maybeRestoreSession(){ if(!(state.gapiReady&&state.gisReady)) return; if(state.accessToken){ gapi.client.setToken({access_token:state.accessToken}); afterTokenObtained().catch(()=>logout()); } }
+
+  function requestLogin(){
+    if(!GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID.includes('YOUR_GOOGLE_OAUTH_CLIENT_ID')){ qs('#gateMessage').textContent='GOOGLE_CLIENT_ID を設定してください。'; return; }
+    if(!state.tokenClient){ qs('#gateMessage').textContent='Google API 初期化待ちです...'; return; }
+    state.tokenClient.requestAccessToken({ prompt:'consent' });
+  }
+
+  async function afterTokenObtained(){
+    gapi.client.setToken({access_token:state.accessToken});
+    const me=await gapi.client.request({ path:'https://www.googleapis.com/oauth2/v2/userinfo' });
+    const email=me.result.email; state.userEmail=email;
+
+    if(!allowedUsers.includes(email)){
+      setStatus('このアプリにアクセスする権限がありません','warn');
+      qs('#gateMessage').textContent='このアプリにアクセスする権限がありません';
+      qs('#appRoot').classList.add('hidden'); qs('#tabs').classList.add('hidden');
+      return;
+    }
+
+    sessionStorage.setItem('gdrive_access_token', state.accessToken);
+    sessionStorage.setItem('gdrive_user_email', email);
+
+    setStatus(`ログイン中: ${email}`,'ok'); qs('#loginBtn').classList.add('hidden'); qs('#logoutBtn').classList.remove('hidden');
+    qs('#tabs').classList.remove('hidden'); qs('#loginGate').classList.add('hidden'); qs('#appRoot').classList.remove('hidden');
+
+    try { await initDriveStorage(); render(); }
+    catch(err){ qs('#gateMessage').textContent=`Drive初期化エラー: ${err.message||err}`; qs('#loginGate').classList.remove('hidden'); qs('#appRoot').classList.add('hidden'); qs('#tabs').classList.add('hidden'); }
+  }
+
+  function logout(){
+    state.accessToken=''; state.userEmail=''; sessionStorage.removeItem('gdrive_access_token'); sessionStorage.removeItem('gdrive_user_email');
+    if(window.google?.accounts?.oauth2 && gapi.client.getToken()?.access_token){ google.accounts.oauth2.revoke(gapi.client.getToken().access_token); }
+    gapi.client.setToken(''); setStatus('ログイン未確認'); qs('#loginBtn').classList.remove('hidden'); qs('#logoutBtn').classList.add('hidden'); qs('#tabs').classList.add('hidden'); qs('#loginGate').classList.remove('hidden'); qs('#appRoot').classList.add('hidden');
+  }
+
+  async function initDriveStorage(){
+    state.drive.dataFolderId = await ensureFolder('keiei-soudan-ai-data');
+    state.drive.filesFolderId = await ensureFolder('keiei-soudan-ai-files');
+    state.drive.consultationsFileId = await ensureJsonFile('consultations.json', state.drive.dataFolderId);
+    state.records = await loadConsultations();
+    setDebug(`Drive読込完了: ${state.records.length}件`, true);
+  }
+
+  async function ensureFolder(name){
+    const q=`mimeType='application/vnd.google-apps.folder' and name='${name}' and trashed=false`;
+    const res=await gapi.client.drive.files.list({ q, fields:'files(id,name)', pageSize:1 });
+    if(res.result.files?.length) return res.result.files[0].id;
+    const cr=await gapi.client.drive.files.create({ resource:{name,mimeType:'application/vnd.google-apps.folder'}, fields:'id' });
+    return cr.result.id;
+  }
+
+  async function ensureJsonFile(name, folderId){
+    const q=`'${folderId}' in parents and name='${name}' and trashed=false`;
+    const res=await gapi.client.drive.files.list({ q, fields:'files(id,name)', pageSize:1 });
+    if(res.result.files?.length) return res.result.files[0].id;
+    const metadata={name, parents:[folderId], mimeType:'application/json'};
+    const boundary='foo_bar_baz';
+    const body=`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n[]\r\n--${boundary}--`;
+    const created=await gapi.client.request({ path:'/upload/drive/v3/files', method:'POST', params:{uploadType:'multipart'}, headers:{'Content-Type':`multipart/related; boundary=${boundary}`}, body });
+    return created.result.id;
+  }
+
+  async function loadConsultations(){
+    const res=await gapi.client.drive.files.get({ fileId: state.drive.consultationsFileId, alt:'media' });
+    return Array.isArray(res.result) ? res.result : [];
+  }
+
+  async function saveConsultations(){
+    const boundary='foo_bar_baz';
+    const metadata={ mimeType:'application/json' };
+    const body=`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(state.records)}\r\n--${boundary}--`;
+    await gapi.client.request({ path:`/upload/drive/v3/files/${state.drive.consultationsFileId}`, method:'PATCH', params:{uploadType:'multipart'}, headers:{'Content-Type':`multipart/related; boundary=${boundary}`}, body });
+    setDebug('Google Driveに保存しました', true);
+  }
+
+  async function uploadFileToDrive(file){
+    const allowed = ['application/pdf','application/vnd.openxmlformats-officedocument.wordprocessingml.document','audio/mpeg','audio/wav','audio/x-wav','audio/mp4','image/jpeg','image/png'];
+    const ext = file.name.toLowerCase().split('.').pop();
+    const extAllowed = ['pdf','docx','mp3','wav','m4a','jpg','jpeg','png'];
+    if(!allowed.includes(file.type) && !extAllowed.includes(ext)) throw new Error(`対応外ファイル: ${file.name}`);
+
+    const metadata={ name:file.name, parents:[state.drive.filesFolderId] };
+    const form=new FormData();
+    form.append('metadata', new Blob([JSON.stringify(metadata)], {type:'application/json'}));
+    form.append('file', file);
+    const resp=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,createdTime,webViewLink',{ method:'POST', headers:{Authorization:`Bearer ${state.accessToken}`}, body:form });
+    if(!resp.ok) throw new Error(`アップロード失敗: ${file.name}`);
+    const j=await resp.json();
+    return { id:j.id, name:j.name, mimeType:j.mimeType || file.type, createdTime:j.createdTime || new Date().toISOString(), webViewLink:j.webViewLink || `https://drive.google.com/file/d/${j.id}/view` };
+  }
+
+  function render(){ renderMain(); renderImport(); }
+
+  function renderMain(){
+    const p=qs('#mainPage');
+    const industries=[...new Set(state.records.map(r=>r.industry).filter(Boolean))];
+    const issueTags=[...new Set(state.records.flatMap(r=>r.tags?.issueTags||[]))];
+
+    const rows = state.records.filter(r=>{
+      if(state.filters.keyword){ const t=`${r.companyName} ${r.consultationDetails} ${r.currentIssues}`; if(!t.includes(state.filters.keyword)) return false; }
+      if(state.filters.industry && r.industry!==state.filters.industry) return false;
+      if(state.filters.issueTag && !(r.tags?.issueTags||[]).includes(state.filters.issueTag)) return false;
+      return true;
+    });
+
+    p.innerHTML=`
+      <div class="layout">
+        <section class="card">
+          <h2>主ページ</h2>
+          <div class="form-grid" id="formWrap">
+            ${inp('consultationDate','相談日','date')}${inp('clientName','相談者名')}${inp('companyName','会社名')}${inp('industry','業種')}
+            <label><span>相談タイプ</span><select name="consultationType">${TYPE_CANDIDATES.map(t=>`<option ${state.form.consultationType===t?'selected':''}>${t}</option>`).join('')}</select></label>
+            ${ta('consultationDetails','相談内容',true)}${ta('currentIssues','現在の課題',true)}${ta('desiredDirection','希望する方向性')}
+          </div>
+          <div class="btns"><button id="genBtn" class="primary">提案生成</button><button id="saveBtn">保存</button><button id="simBtn">類似案件検索</button></div>
+          <p id="saveDebug" class="muted">${esc(state.saveDebug)}</p>
+        </section>
+        <section class="card">
+          <h2>AI提案</h2>${state.aiOutput?aiCard():'<p class="muted">提案生成を押してください。</p>'}
+          <h2>類似案件</h2>${state.similar.length? state.similar.map(s=>`<div class="mini" data-open="${s.record.id}"><p><strong>類似度:</strong> ${s.score}</p><p><strong>会社名:</strong> ${esc(s.record.companyName)}</p><p><strong>主な課題:</strong> ${esc(s.record.currentIssues)}</p><p><strong>なぜ似ているか:</strong> ${esc(s.reason)}</p></div>`).join(''):'<p class="muted">類似案件検索を実行してください。</p>'}
+        </section>
+      </div>
+      <section class="card"><h3>検索・絞り込み</h3><div class="form-grid"><input id="fKeyword" placeholder="キーワード" value="${esc(state.filters.keyword)}"><select id="fIndustry"><option value="">業種</option>${industries.map(x=>`<option ${state.filters.industry===x?'selected':''}>${esc(x)}</option>`).join('')}</select><select id="fIssueTag"><option value="">課題タグ</option>${issueTags.map(x=>`<option ${state.filters.issueTag===x?'selected':''}>${esc(x)}</option>`).join('')}</select></div></section>
+      <section class="card"><h2>保存済み一覧</h2><table><thead><tr><th>相談日</th><th>会社名</th><th>業種</th><th>相談タイプ</th><th>相談内容</th></tr></thead><tbody>${rows.map(r=>`<tr data-open="${r.id}"><td>${esc(r.consultationDate)}</td><td>${esc(r.companyName)}</td><td>${esc(r.industry)}</td><td>${chips([r.consultationType||'その他'])}</td><td>${esc((r.consultationDetails||'').slice(0,30))}</td></tr>`).join('') || '<tr><td colspan="5">データなし</td></tr>'}</tbody></table></section>
+      <section class="card"><h2>詳細</h2>${detail()}</section>`;
+
+    p.querySelectorAll('[name]').forEach(el=>el.addEventListener('input',e=>{ state.form[e.target.name]=e.target.value; }));
+    qs('#fKeyword').oninput=e=>{ state.filters.keyword=e.target.value; renderMain(); };
+    qs('#fIndustry').oninput=e=>{ state.filters.industry=e.target.value; renderMain(); };
+    qs('#fIssueTag').oninput=e=>{ state.filters.issueTag=e.target.value; renderMain(); };
+
+    qs('#genBtn').onclick=()=>{ state.form.tags=generateTags(state.form); state.form.consultationType=classifyConsultationType(state.form); state.aiOutput=generateConsultationAdvice(state.form, state.records); renderMain(); };
+    qs('#simBtn').onclick=()=>{ const cur={...state.form,tags:state.form.tags||generateTags(state.form),consultationType:state.form.consultationType||classifyConsultationType(state.form)}; state.similar=findSimilarCases(cur,state.records); renderMain(); };
+    qs('#saveBtn').onclick=async()=>{ try{ const rec={...state.form,id:crypto.randomUUID(),sourceType:'manual',createdAt:new Date().toISOString(),tags:state.form.tags||generateTags(state.form),consultationType:state.form.consultationType||classifyConsultationType(state.form),aiOutput:state.aiOutput||{consultationSummary:''}}; state.records.unshift(rec); await saveConsultations(); state.selectedId=rec.id; render(); alert('Google Driveに保存しました'); }catch(err){ setDebug(`保存失敗: ${err.message||err}`); alert(`保存失敗: ${err.message||err}`);} };
+    p.querySelectorAll('[data-open]').forEach(el=>el.onclick=()=>{ state.selectedId=el.dataset.open; renderMain(); });
+  }
+
+  function renderImport(){
+    const p=qs('#importPage');
+    p.innerHTML=`<section class="card"><h2>蓄積ページ</h2><p class="muted">議事録取り込み・PDF/Word/音声/画像保存・過去事例一括取込み（csv/json/txt）に対応。</p>
+      <textarea id="importText" rows="8" placeholder="議事録テキストを貼り付け">${esc(state.importText)}</textarea>
+      <label><span>添付ファイル（pdf/docx/mp3/wav/m4a/jpg/jpeg/png）</span><input type="file" id="fileUpload" multiple accept=".pdf,.docx,.mp3,.wav,.m4a,.jpg,.jpeg,.png"></label>
+      <label><span>過去事例一括取り込み（csv/json/txt）</span><input type="file" id="historyBulk" multiple accept=".csv,.json,.txt"></label>
+      <div class="btns"><button id="importSave" class="primary">解析して保存</button><button id="bulkImportBtn">過去事例を一括取り込み</button><button id="seed130Btn">130件サンプル投入</button></div>
+      <p id="saveDebugImport" class="muted">${esc(state.saveDebug)}</p>
+      <h3>保存済み添付ファイル一覧</h3>
+      <div class="mini">${allAttachmentRows()}</div>
+    </section>`;
+    qs('#importText').oninput=e=>state.importText=e.target.value;
+
+    qs('#seed130Btn').onclick=async()=>{ try{ for(let i=1;i<=130;i++){ state.records.push({ ...emptyRecord(), id:crypto.randomUUID(), sourceType:'imported', consultationDate:`2025-${String((i%12)+1).padStart(2,'0')}-${String((i%27)+1).padStart(2,'0')}`, clientName:`相談者${i}`, companyName:`事例企業${i}`, industry:['飲食','小売','製造業','サービス業'][i%4], consultationType:TYPE_CANDIDATES[i%TYPE_CANDIDATES.length], consultationDetails:`事例${i}の相談内容`, currentIssues:`事例${i}の課題`, proposalSummary:`事例${i}の提案`, tags:{industryTags:[], issueTags:[ISSUE_TAGS[i%ISSUE_TAGS.length]], actionTags:[ACTION_TAGS[i%ACTION_TAGS.length]], resultTags:[]}, aiOutput:{consultationSummary:`事例${i}要約`} }); } await saveConsultations(); setDebug('130件サンプルをDrive保存しました', true); render(); }catch(err){ setDebug(`130件投入失敗: ${err.message||err}`); } };
+
+    qs('#bulkImportBtn').onclick=async()=>{ try{ const files=[...(qs('#historyBulk').files||[])]; if(!files.length){ alert('取り込みファイルを選択してください'); return; } let added=0; for(const f of files){ const txt=await f.text(); if(f.name.endsWith('.json')){ const arr=JSON.parse(txt); const records=Array.isArray(arr)?arr:[arr]; for(const r of records){ state.records.push(normalizeImported(r)); added++; } } else if(f.name.endsWith('.csv')){ const rows=parseCsv(txt); for(const r of rows){ state.records.push(normalizeImported(r)); added++; } } else if(f.name.endsWith('.txt')){ const blocks=txt.split(/\n\s*\n/).map(x=>x.trim()).filter(Boolean); for(const b of blocks){ state.records.push(normalizeImported(parseKeyValueBlock(b))); added++; } } } await saveConsultations(); setDebug(`過去事例${added}件をDrive保存しました`, true); render(); }catch(err){ setDebug(`一括取込み失敗: ${err.message||err}`); alert(`一括取込み失敗: ${err.message||err}`); } };
+
+    qs('#importSave').onclick=async()=>{ try{ const draft=emptyRecord(); draft.sourceType='imported'; draft.rawText=state.importText; Object.assign(draft, parseKeyValueBlock(state.importText)); draft.consultationType=classifyConsultationType(draft); draft.tags=generateTags(draft); draft.aiOutput={consultationSummary:(draft.rawText||draft.consultationDetails).slice(0,120)}; const files=[...(qs('#fileUpload').files||[])]; draft.attachments=[]; for(const f of files){ draft.attachments.push(await uploadFileToDrive(f)); } state.records.unshift(draft); await saveConsultations(); state.selectedId=draft.id; setDebug('Google Driveに保存しました', true); render(); alert('Google Driveに保存しました'); }catch(err){ setDebug(`保存失敗: ${err.message||err}`); alert(`保存失敗: ${err.message||err}`); } };
+  }
+
+  function parseCsv(text){
+    const lines=text.split(/\r?\n/).filter(Boolean); if(lines.length<2) return [];
+    const headers=lines[0].split(',').map(h=>h.trim());
+    return lines.slice(1).map(line=>{ const cols=line.split(','); const o={}; headers.forEach((h,i)=>o[h]=cols[i]?.trim()||''); return o; });
+  }
+
+  function parseKeyValueBlock(text){
+    const out={}; text.split(/\n+/).forEach(line=>{ const [k,...rest]=line.split(':'); const v=rest.join(':').trim(); if(!k) return; const key=k.trim();
+      if(key==='相談日') out.consultationDate=v; else if(key==='相談者名') out.clientName=v; else if(key==='会社名') out.companyName=v; else if(key==='業種') out.industry=v;
+      else if(key==='相談内容') out.consultationDetails=v; else if(key==='課題'||key==='現在の課題') out.currentIssues=v; else if(key==='提案内容') out.proposalSummary=v; else if(key==='次回宿題') out.nextActions=v;
+    });
+    return out;
+  }
+
+  function normalizeImported(raw){
+    const r={...emptyRecord(), ...raw, id:crypto.randomUUID(), sourceType:'imported', createdAt:new Date().toISOString()};
+    r.consultationType=r.consultationType||classifyConsultationType(r);
+    r.tags=r.tags?.issueTags ? r.tags : generateTags(r);
+    r.aiOutput=r.aiOutput?.consultationSummary ? r.aiOutput : { consultationSummary: (r.rawText||r.consultationDetails||'').slice(0,120) };
+    return r;
+  }
+
+  function inp(name,label,type='text'){ return `<label><span>${label}</span><input type="${type}" name="${name}" value="${esc(state.form[name]||'')}"></label>`; }
+  function ta(name,label,full=false){ return `<label class="${full?'full':''}"><span>${label}</span><textarea name="${name}">${esc(state.form[name]||'')}</textarea></label>`; }
+  function aiCard(){ const a=state.aiOutput||{}; return `<div class="mini"><strong>現状整理</strong><p>${esc(a.situationSummary||'')}</p></div><div class="mini"><strong>相談記録要約</strong><p>${esc(a.consultationSummary||'')}</p></div>`; }
+  function detail(){ const r=state.records.find(x=>x.id===state.selectedId); if(!r) return '<p class="muted">一覧をクリックすると詳細表示します。</p>'; return `<div class="mini"><p><strong>基本情報:</strong> 相談日 ${esc(r.consultationDate)} / 相談者 ${esc(r.clientName)} / 会社 ${esc(r.companyName)} / 業種 ${esc(r.industry)} / 相談タイプ ${esc(r.consultationType||'その他')}</p><p><strong>相談内容:</strong> ${esc(r.consultationDetails)}</p><p><strong>課題:</strong> ${esc(r.currentIssues)}</p><p><strong>提案内容:</strong> ${esc(r.proposalSummary||'')}</p><p><strong>要約:</strong> ${esc(r.aiOutput?.consultationSummary||'')}</p><p><strong>タグ:</strong> ${chips([...(r.tags?.industryTags||[]),...(r.tags?.issueTags||[]),...(r.tags?.actionTags||[])])}</p><p><strong>原文:</strong></p><pre>${esc(r.rawText||'原文なし')}</pre><p><strong>添付ファイル:</strong><br>${(r.attachments||[]).map(f=>`${esc(f.name)} / ${esc(f.mimeType||'')} / ${esc(f.createdTime||'')} / <a href="${esc(f.webViewLink||`https://drive.google.com/file/d/${f.id}/view`)}" target="_blank" rel="noopener">Driveリンク</a>`).join('<br>') || 'なし'}</p></div>`; }
+
+  function allAttachmentRows(){
+    const files = state.records.flatMap(r => (r.attachments || []).map(f => ({...f, companyName:r.companyName, consultationDate:r.consultationDate})));
+    if(!files.length) return 'まだ添付ファイルはありません。';
+    return files.slice(0,200).map(f=>`${esc(f.consultationDate||'')} / ${esc(f.companyName||'')} / ${esc(f.name)} / ${esc(f.mimeType||'')} / <a href="${esc(f.webViewLink||`https://drive.google.com/file/d/${f.id}/view`)}" target="_blank" rel="noopener">Driveリンク</a>`).join('<br>');
+  }
+
+  function switchPage(mode){ qs('#mainPage').classList.toggle('active',mode==='main'); qs('#importPage').classList.toggle('active',mode==='import'); qs('#tabMain').classList.toggle('active',mode==='main'); qs('#tabImport').classList.toggle('active',mode==='import'); }
+})();
+</script>
+</body>
+</html>
