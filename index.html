@@ -1,13 +1,124 @@
 <!doctype html>
 <html lang="ja">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>経営相談AI</title>
-    <meta http-equiv="refresh" content="0; url=./index-standalone.html" />
-  </head>
-  <body>
-    <p>リダイレクト中です… <a href="./index-standalone.html">こちら</a></p>
-    <script>location.replace('./index-standalone.html');</script>
-  </body>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>経営相談思考補助アプリ</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="loginRequired" style="padding:24px;">
+    <h2>Googleでログインしてください</h2>
+    <p>ログインしないとアプリは使えません。</p>
+
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+    <div
+      id="g_id_onload"
+      data-client_id="611836615589-2frs69tns3q77dbf0a4f7fuikgc307hb.apps.googleusercontent.com"
+      data-callback="handleCredentialResponse">
+    </div>
+
+    <div class="g_id_signin" data-type="standard"></div>
+  </div>
+
+  <div id="app" style="display:none;">
+    <header class="topbar">
+      <h1>経営相談思考補助アプリ</h1>
+      <nav class="nav-tabs" aria-label="ページ切り替え">
+        <button class="nav-tab active" data-page="mainPage">主ページ（現場用）</button>
+        <button class="nav-tab" data-page="importPage">蓄積ページ（取り込み用）</button>
+      </nav>
+    </header>
+
+    <main>
+      <section id="mainPage" class="page active"></section>
+      <section id="importPage" class="page"></section>
+    </main>
+
+    <template id="chipTemplate">
+      <span class="chip"></span>
+    </template>
+
+    <script type="module" src="src/main.js"></script>
+  </div>
+
+  <script>
+    const allowedUsers = ["dddaaaiiiii@gmail.com"];
+
+    function parseJwt(token) {
+      const base64Url = token.split(".")[1];
+      const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+      const jsonPayload = decodeURIComponent(
+        atob(base64)
+          .split("")
+          .map(c => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+          .join("")
+      );
+      return JSON.parse(jsonPayload);
+    }
+
+    function showLoginOnly(message = "") {
+      document.getElementById("app").style.display = "none";
+      const loginBox = document.getElementById("loginRequired");
+      loginBox.style.display = "block";
+
+      if (message) {
+        loginBox.innerHTML = "<h2>" + message + "</h2>";
+      }
+    }
+
+    function showApp() {
+      document.getElementById("loginRequired").style.display = "none";
+      document.getElementById("app").style.display = "block";
+    }
+
+    function handleCredentialResponse(response) {
+      try {
+        const payload = parseJwt(response.credential);
+        const email = payload.email || "";
+
+        if (!allowedUsers.includes(email)) {
+          localStorage.removeItem("login_token");
+          localStorage.removeItem("login_email");
+          showLoginOnly("このアプリにアクセスする権限がありません");
+          return;
+        }
+
+        localStorage.setItem("login_token", response.credential);
+        localStorage.setItem("login_email", email);
+        showApp();
+      } catch (e) {
+        showLoginOnly("ログインに失敗しました");
+      }
+    }
+
+    window.addEventListener("load", () => {
+      const token = localStorage.getItem("login_token");
+
+      if (!token) {
+        showLoginOnly();
+        return;
+      }
+
+      try {
+        const payload = parseJwt(token);
+        const email = payload.email || "";
+
+        if (!allowedUsers.includes(email)) {
+          localStorage.removeItem("login_token");
+          localStorage.removeItem("login_email");
+          showLoginOnly("このアプリにアクセスする権限がありません");
+          return;
+        }
+
+        showApp();
+      } catch (e) {
+        localStorage.removeItem("login_token");
+        localStorage.removeItem("login_email");
+        showLoginOnly();
+      }
+    });
+  </script>
+</body>
 </html>
