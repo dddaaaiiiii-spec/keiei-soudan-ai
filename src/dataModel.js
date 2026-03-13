@@ -1,0 +1,50 @@
+export function createEmptyRecord() {
+  const now = new Date();
+  const dateText = now.toISOString().slice(0, 10);
+  return {
+    id: crypto.randomUUID(),
+    sourceType: 'manual',
+    createdAt: now.toISOString(),
+    consultationDate: dateText,
+    consultantName: '',
+    clientName: '',
+    companyName: '',
+    industry: '',
+    productFeatures: '',
+    valueProposition: '',
+    targetCustomer: '',
+    businessModel: '',
+    strengths: '',
+    consultationDetails: '',
+    currentIssues: '',
+    desiredDirection: '',
+    consultationType: 'その他',
+    proposalSummary: '',
+    nextActions: '',
+    notes: '',
+    rawText: '',
+    summary: {
+      overview: '',
+      keyIssues: '',
+      proposalPoints: '',
+      nextCheckpoints: '',
+    },
+    tags: {
+      industryTags: [],
+      issueTags: [],
+      actionTags: [],
+      resultTags: [],
+    },
+    aiOutput: {
+      situationSummary: '',
+      issueAnalysis: '',
+      topPriorities: [],
+      quickActions: [],
+      midTermStrategies: [],
+      differentiationIdeas: [],
+      copyIdeas: [],
+      homework: [],
+      consultationSummary: '',
+    },
+  };
+}
