@@ -1,126 +1,122 @@
-# 経営相談 思考補助アプリ（Google Drive同期版）
+# 経営相談 思考補助アプリ（試作版）
 
-> **まずは `index-standalone.html` を開いて使ってください。**  
-> この版は Googleログイン必須 + Google Drive保存（`consultations.json`）で、PC/スマホ/別PCで同じデータを共有できます。
+経営相談の現場で、ヒアリング内容を入力しながら論点整理・提案候補を確認できる **フロントエンド単体 Web アプリ**です。  
+主ページ（現場用）と蓄積ページ（過去議事録取り込み用）の2ページ構成です。
 
-## 現在の動作仕様（完成版）
+## 主な機能
 
-- Google OAuthログイン必須（未ログインではアプリUIを表示しない）
-- `allowedUsers = ["あなたのGmail"]` でアクセス制御
-- 不一致時は「このアプリにアクセスする権限がありません」を表示
-- 相談データは Google Drive の `keiei-soudan-ai-data/consultations.json` に保存
-- PDF/Word/音声/画像は Google Drive の `keiei-soudan-ai-files` に保存
-- `localStorage` は本運用フローで使用しない（保存はDriveのみ）
-- 相談入力 / 相談履歴 / タグ / 類似案件検索 / AI提案生成を維持
-- 画面上部に「ログイン中: user@gmail.com」表示 + ログアウトボタン
-- トークンはブラウザセッションのみ保持（`sessionStorage`）
-- ソースコードに秘密情報（APIキー等）は埋め込まない
+- 主ページ（現場用）
+  - 相談情報フォーム入力（日本語UI）
+  - Chrome Web Speech API 音声入力（主要テキスト欄に追記）
+  - 提案生成（ダミーAI）
+  - 提案生成時に相談タイプ（consultationType）を自動分類
+  - 保存 / 入力クリア / 類似案件検索 / 要約表示
+  - 保存済み一覧・詳細表示
+  - キーワード、業種、相談タイプ、課題タグ、施策タグ、手入力/取り込みで絞り込み
+- 蓄積ページ（取り込み用）
+  - テキスト貼り付け
+  - txt/md/json/csv 読み込み
+  - PDF/Word、音声は将来対応UI（未対応表示）
+  - 要約生成、タグ生成（ダミーAI）
+  - タグ編集後に保存
+- 類似案件検索
+  - 相談タイプ一致（20%）を含む重み付きスコアリング
+  - 上位5件を表示
+- データ保存
+  - localStorage に統一オブジェクトで保存
+  - 手入力記録（manual）と取り込み記録（imported）を統合管理
+- サンプルデータ
+  - 飲食 / 小売 / 製造業 / サービス業 を含む4件を初期投入
 
+## ファイル構成
 
-## 保存仕様（Driveのみ）
+- `index.html` : 2ページのルートレイアウト、上部ナビ、エントリーポイント
+- `styles.css` : 業務向けの落ち着いたカードUI、レスポンシブ調整
+- `src/main.js` : 画面描画、イベント制御、保存・検索・取り込みフロー
+- `src/dataModel.js` : 相談記録の統一データモデル
+- `src/storage.js` : localStorage 永続化・サンプル初期化
+- `src/sampleData.js` : 初期サンプルデータ
+- `src/aiService.js` : AI 抽象化レイヤー（差し替えポイント）
+- `src/voice.js` : 音声入力ユーティリティ（Web Speech API）
 
-- 保存先フォルダ（自動作成）
-  - `keiei-soudan-ai-data`
-  - `keiei-soudan-ai-files`
-- 相談データ本体: `keiei-soudan-ai-data/consultations.json`
-- 添付ファイル: `keiei-soudan-ai-files`
-- 対応添付形式: `pdf / docx / mp3 / wav / m4a / jpg / jpeg / png`
-- 保存成功時: 画面に **「Google Driveに保存しました」** を表示
-- 保存失敗時: エラーメッセージを表示
+## ローカル起動手順（Chrome推奨）
 
-### 保存確認（デバッグ）
-
-1. 画面内の保存メッセージを確認（保存成功/失敗を表示）
-2. Google Driveで以下を確認
-   - `keiei-soudan-ai-data/consultations.json` が更新されている
-   - `keiei-soudan-ai-files` に添付ファイルが追加されている
-3. 相談レコード詳細で、添付のDriveリンクが表示される
-
-### 過去事例130件活用
-
-- 蓄積ページの「130件サンプル投入」で大量データをDriveへ投入可能
-- 蓄積ページの一括取込み（`csv/json/txt`）で既存事例を検索対象へ追加
-- 取り込んだ事例は通常レコードと同じく、
-  - 類似案件検索
-  - 業種検索
-  - 課題検索
-  - AI提案生成（過去事例の類似上位を参照）
-  の対象になる
-
----
-
-## 使い方
-
-### 1) 設定
-
-`index-standalone.html` の先頭スクリプト内を設定してください。
-
-- `GOOGLE_CLIENT_ID`
-- `allowedUsers`
-
-```js
-const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com';
-const allowedUsers = ['あなたのGmail'];
-```
-
-### 2) 起動
-
-- ローカル確認: `index-standalone.html` をブラウザで開く（推奨は localhost 配信）
-- 公開運用: GitHub Pages で `index-standalone.html` を配信
-
----
-
-## Google Drive API 設定手順
-
-1. Google Cloud でプロジェクト作成
-2. 「Google Drive API」を有効化
-3. OAuth 同意画面を設定（テストユーザーに利用者Gmailを追加）
-4. OAuth クライアントID（Webアプリ）を作成
-5. 承認済みJavaScript生成元を設定
-   - ローカル: `http://localhost:5173`
-   - GitHub Pages: `https://<user>.github.io`
-6. `GOOGLE_CLIENT_ID` に発行値を設定
-
-> Drive保存先フォルダは初回ログイン時に自動作成されます。
-
----
-
-## OAuth 設定で必要なポイント
-
-- スコープ: `https://www.googleapis.com/auth/drive`
-- 同意画面で「外部」を使う場合、公開前はテストユーザー登録が必要
-- `allowedUsers` のメール一致チェックでアプリ利用者を制限
-
----
-
-## ローカルテスト方法
-
-Google OAuthの都合上、`file://` 直開きより localhost 配信を推奨します。
+### 1) リポジトリに移動
 
 ```bash
 cd /workspace/keiei-soudan-ai
+```
+
+### 2) ローカルサーバ起動（例: Python）
+
+```bash
 python3 -m http.server 5173
 ```
 
-ブラウザで:
+### 3) Chrome でアクセス
 
-- `http://localhost:5173/index-standalone.html`
+```text
+http://localhost:5173
+```
 
----
+> `file://` 直開きでも表示できますが、ブラウザ制約回避のためローカルサーバ起動を推奨します。
 
-## GitHub Pages 公開方法
+## データモデル（統一オブジェクト）
 
-1. リポジトリの Settings > Pages でデプロイ有効化
-2. Branch を `main`（または対象ブランチ）に設定
-3. 公開URLで `index-standalone.html` を開く
-   - `https://<user>.github.io/<repo>/index-standalone.html`
-4. OAuthの承認済みJavaScript生成元に `https://<user>.github.io` を追加
+`src/dataModel.js` の `createEmptyRecord()` に、将来DB移行しやすい形で以下を定義しています。
 
-`.nojekyll` は配置済みです。
+- id
+- sourceType（manual / imported）
+- createdAt
+- consultationDate
+- consultantName
+- clientName
+- companyName
+- industry
+- productFeatures
+- valueProposition
+- targetCustomer
+- businessModel
+- strengths
+- consultationDetails
+- currentIssues
+- desiredDirection
+- consultationType
+- proposalSummary
+- nextActions
+- notes
+- rawText
+- summary（overview / keyIssues / proposalPoints / nextCheckpoints）
+- tags（industryTags / issueTags / actionTags）
+- aiOutput（situationSummary / issueAnalysis / topPriorities / quickActions / midTermStrategies / differentiationIdeas / copyIdeas / homework / consultationSummary）
 
----
+## OpenAI API接続時の差し替えポイント
+
+現在は **AI未接続でも動くダミー実装**です。  
+将来のAPI接続は `src/aiService.js` の以下関数を置換してください。
+
+- `generateConsultationAdvice(input)`
+- `summarizeImportedRecord(input)`
+- `generateTags(input)`
+- `classifyConsultationType(input)`
+- `findSimilarCases(currentCase, savedCases)`
+- `explainSimilarityReason(context)`
+
+### 接続方針
+
+1. まず `src/aiService.js` の6関数（`generateConsultationAdvice` / `summarizeImportedRecord` / `generateTags` / `classifyConsultationType` / `findSimilarCases` / `explainSimilarityReason`）をAPI呼び出し実装に差し替える。
+2. APIキーはフロントコードへ直書きせず、将来バックエンドの環境変数（例: `OPENAI_API_KEY`）に設定する想定。
+3. フロント側は `.env` の公開設定（例: `AI_PROVIDER=dummy|openai-proxy`）で接続先を切替える。
+4. フロント直書きを避ける理由: APIキー漏えい防止、利用制限・監査ログ・レート制御をサーバ側で統一管理するため。
+5. 返却JSONスキーマは現状オブジェクト形（提案/要約/タグ/類似結果）に合わせて固定する。
 
 ## 補足
 
-- `index.html` は `index-standalone.html` へリダイレクトします。
-- 既存の `src/*` モジュール版は残していますが、運用は standalone を優先してください。
+- 音声入力は Chrome の Web Speech API 前提です
+- まずは使える試作版として、操作性と見やすさを優先しています
+
+### aiService の入出力統一ルール
+
+- 入力は相談記録オブジェクト互換（不足項目は内部で正規化）
+- 出力は各関数ごとの固定JSON形で返却（UIはこの形のみ参照）
+- `findSimilarCases` は `{ record, score, similarityReason }` 配列を返却
