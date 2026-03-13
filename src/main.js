@@ -413,8 +413,8 @@ function renderImportPage() {
       <div class="import-grid">
         <label class="full"><span>議事録テキスト貼り付け</span><textarea id="rawImportText" rows="8" placeholder="ここに議事録を貼り付けるとキューに追加されます"></textarea></label>
         <label><span>ファイルアップロード（txt / json / csv）</span><input type="file" id="textFileInput" accept=".txt,.json,.csv" multiple /></label>
-        <label><span>PDF/Word（添付アップロード）</span><input type="file" disabled /><small class="muted">対応は index.html の本番版で有効です</small></label>
-        <label><span>音声ファイル（添付アップロード）</span><input type="file" disabled /><small class="muted">対応は index.html の本番版で有効です</small></label>
+        <label><span>PDF/Word（将来対応）</span><input type="file" disabled /><small class="muted">現在未対応です</small></label>
+        <label><span>音声ファイル（将来対応）</span><input type="file" disabled /><small class="muted">現在未対応です</small></label>
       </div>
       <div class="button-row">
         <button id="addTextImportBtn" class="primary">テキストを取り込みキューへ追加</button>

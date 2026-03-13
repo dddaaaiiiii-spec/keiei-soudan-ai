@@ -1,13 +1,21 @@
 import { sampleRecords } from './sampleData.js';
 
-// NOTE: 本番版(index.html)はGoogle Drive保存のみを使用する。
-// このモジュールは互換用途として最小限のメモリ実装にしている。
-let memoryRecords = [...sampleRecords];
+const STORAGE_KEY = 'keiei-soudan-records-v1';
 
 export function loadRecords() {
-  return [...memoryRecords];
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sampleRecords));
+    return [...sampleRecords];
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sampleRecords));
+    return [...sampleRecords];
+  }
 }
 
 export function saveRecords(records) {
-  memoryRecords = Array.isArray(records) ? [...records] : [];
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
 }
