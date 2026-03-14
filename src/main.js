@@ -34,6 +34,125 @@ const state = {
   selectedSimilarId: null,
   currentPage: "mainPage"
 };
+function initDriveClient() {
+  if (!window.google || !google.accounts || !google.accounts.oauth2) return;
+
+  driveState.tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: DRIVE_SCOPE,
+    callback: (response) => {
+      if (response && response.access_token) {
+        driveState.accessToken = response.access_token;
+      }
+    }
+  });
+}
+
+function ensureDriveToken() {
+  return new Promise((resolve, reject) => {
+    if (driveState.accessToken) {
+      resolve(driveState.accessToken);
+      return;
+    }
+
+    if (!driveState.tokenClient) {
+      reject(new Error("Drive認証クライアントが初期化されていません。"));
+      return;
+    }
+
+    driveState.tokenClient.callback = (response) => {
+      if (response && response.access_token) {
+        driveState.accessToken = response.access_token;
+        resolve(response.access_token);
+      } else {
+        reject(new Error("Drive認証に失敗しました。"));
+      }
+    };
+
+    driveState.tokenClient.requestAccessToken({ prompt: "consent" });
+  });
+}
+
+async function findDriveFileByName(fileName) {
+  const token = await ensureDriveToken();
+
+  const q = encodeURIComponent(
+    `name='${fileName.replaceAll("'", "\\'")}' and trashed=false`
+  );
+
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    }
+  );
+
+  if (!res.ok) {
+    throw new Error("Drive上の既存ファイル検索に失敗しました。");
+  }
+
+  const data = await res.json();
+  return (data.files && data.files[0]) || null;
+}
+
+async function uploadJsonToDrive(fileName, jsonText, existingFileId = null) {
+  const token = await ensureDriveToken();
+
+  const metadata = {
+    name: fileName,
+    mimeType: "application/json"
+  };
+
+  const boundary = "-------314159265358979323846";
+  const delimiter = `\r\n--${boundary}\r\n`;
+  const closeDelim = `\r\n--${boundary}--`;
+
+  const body =
+    delimiter +
+    "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
+    JSON.stringify(metadata) +
+    delimiter +
+    "Content-Type: application/json\r\n\r\n" +
+    jsonText +
+    closeDelim;
+
+  const url = existingFileId
+    ? `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=multipart`
+    : `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart`;
+
+  const method = existingFileId ? "PATCH" : "POST";
+
+  const res = await fetch(url, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": `multipart/related; boundary=${boundary}`
+    },
+    body
+  });
+
+  if (!res.ok) {
+    throw new Error("Driveへの保存に失敗しました。");
+  }
+
+  return await res.json();
+}
+
+async function syncAllDataToDrive() {
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    records: state.records
+  };
+
+  const existing = await findDriveFileByName(DRIVE_FILENAME);
+  return await uploadJsonToDrive(
+    DRIVE_FILENAME,
+    JSON.stringify(payload, null, 2),
+    existing ? existing.id : null
+  );
+}
 
 function getEl(id) {
   return document.getElementById(id);
