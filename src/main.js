@@ -1,3 +1,9 @@
+fetch("src/cases_full.json")
+  .then(r => r.json())
+  .then(data => {
+    state.records = data;
+    renderMainPage();
+  });
 const state = {
   records: [],
   selectedRecordId: null
