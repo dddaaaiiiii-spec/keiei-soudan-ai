@@ -1,11 +1,10 @@
 const STORAGE_KEY = "keiei_soudan_records";
 
 const state = {
-  records: [],
   seedRecords: [],
   userRecords: [],
+  records: [],
   currentPage: "mainPage",
-  selectedFiles: [],
   selectedRecordId: null
 };
 
@@ -30,15 +29,15 @@ function nl2br(str) {
   return escapeHtml(str).replace(/\n/g, "<br>");
 }
 
+function safeText(value) {
+  if (Array.isArray(value)) return value.filter(Boolean).join(" / ");
+  return String(value ?? "").trim();
+}
+
 function uniqueSorted(values) {
   return [...new Set(values.filter(Boolean))].sort((a, b) =>
     String(a).localeCompare(String(b), "ja")
   );
-}
-
-function safeText(value) {
-  if (Array.isArray(value)) return value.filter(Boolean).join(" / ");
-  return String(value ?? "").trim();
 }
 
 function normalizeRecord(record = {}, source = "json") {
@@ -54,11 +53,9 @@ function normalizeRecord(record = {}, source = "json") {
     companyName: safeText(record.companyName),
     industry: safeText(record.industry),
 
-    // 旧項目
     issue: safeText(record.issue),
     notes: safeText(record.notes),
 
-    // 新項目
     summary: safeText(record.summary),
     problem: safeText(record.problem),
     approach: safeText(record.approach),
@@ -161,37 +158,12 @@ function getUniqueIndustries(category = "") {
   return uniqueSorted(filtered.map((r) => r.industry));
 }
 
-function getFilteredRecords() {
-  const category = getEl("filterCategory")?.value || "";
-  const industry = getEl("filterIndustry")?.value || "";
-
+function getFilteredRecords(category = "", industry = "") {
   return state.records.filter((record) => {
     if (category && classifyConsultation(record) !== category) return false;
     if (industry && record.industry !== industry) return false;
     return true;
   });
-}
-
-function updateIndustryOptions() {
-  const industrySelect = getEl("filterIndustry");
-  if (!industrySelect) return;
-
-  const selectedCategory = getEl("filterCategory")?.value || "";
-  const industries = getUniqueIndustries(selectedCategory);
-  const currentValue = industrySelect.value || "";
-
-  industrySelect.innerHTML = `
-    <option value="">すべて</option>
-    ${industries
-      .map((industry) => `<option value="${escapeHtml(industry)}">${escapeHtml(industry)}</option>`)
-      .join("")}
-  `;
-
-  if (currentValue && industries.includes(currentValue)) {
-    industrySelect.value = currentValue;
-  } else {
-    industrySelect.value = "";
-  }
 }
 
 function renderRecordList(records) {
@@ -242,21 +214,15 @@ function renderRecordList(records) {
   `;
 }
 
-function renderRecordDetail() {
-  const detailEl = getEl("recordDetailArea");
-  if (!detailEl) return;
-
-  const record = state.records.find((r) => r.id === state.selectedRecordId);
-
+function renderRecordDetail(record) {
   if (!record) {
-    detailEl.innerHTML = `
+    return `
       <h3 style="margin-top:0;">事例詳細</h3>
-      <p>左の一覧から事例を選択してください。</p>
+      <p>上の一覧から事例を選択してください。</p>
     `;
-    return;
   }
 
-  detailEl.innerHTML = `
+  return `
     <h3 style="margin-top:0;">事例詳細</h3>
 
     <div style="display:grid;gap:10px;font-size:14px;line-height:1.6;">
@@ -313,135 +279,87 @@ function renderRecordDetail() {
   `;
 }
 
-function bindRecordListEvents() {
-  document.querySelectorAll(".record-item").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.selectedRecordId = button.dataset.recordId || null;
-      renderFilters();
-    });
-  });
-}
-
-function renderFilters() {
-  const filterArea = getEl("filterArea");
-  if (!filterArea) return;
-
-  const categories = getUniqueCategories();
-  const industries = getUniqueIndustries();
-  const filteredRecords = getFilteredRecords();
-
-  filterArea.innerHTML = `
-    <section style="padding:16px;display:grid;gap:14px;">
-      <div style="border:1px solid #ccc;border-radius:8px;padding:14px;background:#fff;">
-        <h3 style="margin:0 0 12px 0;">蓄積データ抽出</h3>
-
-        <div style="display:grid;gap:12px;">
-          <div>
-            <label for="filterCategory"><strong>分類</strong></label>
-            <select id="filterCategory" style="width:100%;padding:8px;margin-top:6px;">
-              <option value="">すべて</option>
-              ${categories
-                .map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`)
-                .join("")}
-            </select>
-          </div>
-
-          <div>
-            <label for="filterIndustry"><strong>業種</strong></label>
-            <select id="filterIndustry" style="width:100%;padding:8px;margin-top:6px;">
-              <option value="">すべて</option>
-              ${industries
-                .map((i) => `<option value="${escapeHtml(i)}">${escapeHtml(i)}</option>`)
-                .join("")}
-            </select>
-          </div>
-
-          <div>
-            <strong>該当事例一覧</strong>
-            <div id="recordListArea" style="margin-top:8px;">
-              ${renderRecordList(filteredRecords)}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div id="recordDetailArea" style="border:1px solid #ccc;border-radius:8px;padding:14px;background:#fff;">
-      </div>
-    </section>
-  `;
-
-  const categorySelect = getEl("filterCategory");
-  const industrySelect = getEl("filterIndustry");
-
-  if (categorySelect) {
-    categorySelect.addEventListener("change", () => {
-      updateIndustryOptions();
-      renderFilters();
-    });
-  }
-
-  if (industrySelect) {
-    industrySelect.addEventListener("change", () => {
-      renderFilters();
-    });
-  }
-
-  renderRecordDetail();
-  bindRecordListEvents();
-}
-
 function renderMainPage() {
   const mainPage = getEl("mainPage");
   if (!mainPage) return;
 
-  const records = ensureArray(state.records);
+  const categories = getUniqueCategories();
+  const industries = getUniqueIndustries();
+  const filteredRecords = getFilteredRecords();
+  const selectedRecord = state.records.find((r) => r.id === state.selectedRecordId) || filteredRecords[0] || null;
+
+  if (!state.selectedRecordId && selectedRecord) {
+    state.selectedRecordId = selectedRecord.id;
+  }
 
   mainPage.innerHTML = `
     <section style="padding:16px;">
-      <h2>相談入力</h2>
-      <div style="display:grid;gap:12px;max-width:900px;">
-        <div>
-          <label>会社名</label>
-          <input id="companyName" type="text" style="width:100%;padding:8px;">
-        </div>
-        <div>
-          <label>業種</label>
-          <input id="industry" type="text" style="width:100%;padding:8px;">
-        </div>
-        <div>
-          <label>相談内容</label>
-          <textarea id="issue" style="width:100%;min-height:120px;padding:8px;"></textarea>
-        </div>
-        <div>
-          <label>メモ</label>
-          <textarea id="notes" style="width:100%;min-height:120px;padding:8px;"></textarea>
-        </div>
-        <div>
-          <button id="saveRecordBtn" style="padding:10px 16px;">保存</button>
-        </div>
-      </div>
+      <div style="display:grid;grid-template-columns:minmax(0, 1.4fr) minmax(320px, 0.9fr);gap:20px;align-items:start;">
+        
+        <div style="border:1px solid #ccc;border-radius:10px;padding:16px;background:#fff;">
+          <h2 style="margin-top:0;">相談入力</h2>
 
-      <hr style="margin:24px 0;">
+          <div style="display:grid;gap:12px;">
+            <div>
+              <label>会社名</label>
+              <input id="companyName" type="text" style="width:100%;padding:8px;box-sizing:border-box;">
+            </div>
 
-      <h3>保存済み一覧</h3>
-      <div id="recordList">
-        ${
-          records.length === 0
-            ? "<p>まだ相談データはありません。</p>"
-            : records
-                .slice()
-                .reverse()
-                .map(
-                  (r) => `
-                    <div style="border:1px solid #ccc;padding:12px;margin-bottom:8px;border-radius:8px;">
-                      <strong>${escapeHtml(r.companyName || "会社名未入力")}</strong><br>
-                      <span>${escapeHtml(getRecordSummary(r))}</span><br>
-                      <small>${escapeHtml(r.createdAt || "")}</small>
-                    </div>
-                  `
-                )
-                .join("")
-        }
+            <div>
+              <label>業種</label>
+              <input id="industry" type="text" style="width:100%;padding:8px;box-sizing:border-box;">
+            </div>
+
+            <div>
+              <label>相談内容</label>
+              <textarea id="issue" style="width:100%;min-height:120px;padding:8px;box-sizing:border-box;"></textarea>
+            </div>
+
+            <div>
+              <label>メモ</label>
+              <textarea id="notes" style="width:100%;min-height:120px;padding:8px;box-sizing:border-box;"></textarea>
+            </div>
+
+            <div>
+              <button id="saveRecordBtn" type="button" style="padding:10px 16px;">保存</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:grid;gap:14px;">
+          <div style="border:1px solid #ccc;border-radius:10px;padding:14px;background:#fff;">
+            <h3 style="margin:0 0 12px 0;">蓄積データ抽出</h3>
+
+            <div style="display:grid;gap:12px;">
+              <div>
+                <label for="filterCategory"><strong>分類</strong></label>
+                <select id="filterCategory" style="width:100%;padding:8px;margin-top:6px;box-sizing:border-box;">
+                  <option value="">すべて</option>
+                  ${categories.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("")}
+                </select>
+              </div>
+
+              <div>
+                <label for="filterIndustry"><strong>業種</strong></label>
+                <select id="filterIndustry" style="width:100%;padding:8px;margin-top:6px;box-sizing:border-box;">
+                  <option value="">すべて</option>
+                  ${industries.map((i) => `<option value="${escapeHtml(i)}">${escapeHtml(i)}</option>`).join("")}
+                </select>
+              </div>
+
+              <div>
+                <strong>該当事例一覧</strong>
+                <div id="recordListArea" style="margin-top:8px;">
+                  ${renderRecordList(filteredRecords)}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="recordDetailArea" style="border:1px solid #ccc;border-radius:10px;padding:14px;background:#fff;">
+            ${renderRecordDetail(selectedRecord)}
+          </div>
+        </div>
       </div>
     </section>
   `;
@@ -450,6 +368,73 @@ function renderMainPage() {
   if (saveBtn) {
     saveBtn.onclick = handleSaveRecord;
   }
+
+  const categorySelect = getEl("filterCategory");
+  const industrySelect = getEl("filterIndustry");
+
+  if (categorySelect) {
+    categorySelect.addEventListener("change", () => {
+      const newIndustries = getUniqueIndustries(categorySelect.value || "");
+      const currentIndustry = industrySelect?.value || "";
+
+      if (industrySelect) {
+        industrySelect.innerHTML = `
+          <option value="">すべて</option>
+          ${newIndustries.map((i) => `<option value="${escapeHtml(i)}">${escapeHtml(i)}</option>`).join("")}
+        `;
+
+        if (currentIndustry && newIndustries.includes(currentIndustry)) {
+          industrySelect.value = currentIndustry;
+        } else {
+          industrySelect.value = "";
+        }
+      }
+
+      refreshFilteredPanel();
+    });
+  }
+
+  if (industrySelect) {
+    industrySelect.addEventListener("change", () => {
+      refreshFilteredPanel();
+    });
+  }
+
+  bindRecordListEvents();
+}
+
+function refreshFilteredPanel() {
+  const category = getEl("filterCategory")?.value || "";
+  const industry = getEl("filterIndustry")?.value || "";
+  const records = getFilteredRecords(category, industry);
+
+  const listArea = getEl("recordListArea");
+  if (listArea) {
+    listArea.innerHTML = renderRecordList(records);
+  }
+
+  const selectedRecord =
+    state.records.find((r) => r.id === state.selectedRecordId && records.some((x) => x.id === r.id)) ||
+    records[0] ||
+    null;
+
+  state.selectedRecordId = selectedRecord ? selectedRecord.id : null;
+
+  const detailArea = getEl("recordDetailArea");
+  if (detailArea) {
+    detailArea.innerHTML = renderRecordDetail(selectedRecord);
+  }
+
+  bindRecordListEvents();
+}
+
+function bindRecordListEvents() {
+  document.querySelectorAll(".record-item").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.selectedRecordId = button.dataset.recordId || null;
+      refreshFilteredPanel();
+    });
+  });
 }
 
 function renderImportPage() {
@@ -458,16 +443,12 @@ function renderImportPage() {
 
   importPage.innerHTML = `
     <section style="padding:16px;">
-      <h2>蓄積ページ</h2>
-      <p>ここは今後、PDF / Word / 音声 / 画像の取り込みに対応します。</p>
+      <div style="border:1px solid #ccc;border-radius:10px;padding:16px;background:#fff;">
+        <h2 style="margin-top:0;">蓄積ページ</h2>
+        <p>ここは今後、PDF / Word / 音声 / 画像の取り込みに対応します。</p>
+      </div>
     </section>
   `;
-}
-
-function renderApp() {
-  renderMainPage();
-  renderImportPage();
-  renderFilters();
 }
 
 function handleSaveRecord() {
@@ -500,7 +481,7 @@ function handleSaveRecord() {
   syncRecords();
   state.selectedRecordId = record.id;
 
-  renderApp();
+  renderMainPage();
 }
 
 function initTabs() {
@@ -519,8 +500,14 @@ function initTabs() {
       if (importPage) importPage.style.display = page === "importPage" ? "block" : "none";
 
       state.currentPage = page;
+
+      if (page === "mainPage") renderMainPage();
+      if (page === "importPage") renderImportPage();
     });
   });
+
+  if (mainPage) mainPage.style.display = "block";
+  if (importPage) importPage.style.display = "none";
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
@@ -528,5 +515,6 @@ window.addEventListener("DOMContentLoaded", async () => {
   await loadSeedRecords();
   syncRecords();
   initTabs();
-  renderApp();
+  renderMainPage();
+  renderImportPage();
 });
