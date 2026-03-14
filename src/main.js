@@ -500,6 +500,26 @@ async function uploadJsonToDrive(fileName, jsonText, existingFileId = null) {
   return await res.json();
 }
 
+async function downloadDriveJsonFile(fileId) {
+  const token = await ensureDriveToken();
+
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    }
+  );
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`Driveからの読込に失敗しました: ${errorText}`);
+  }
+
+  return await res.json();
+}
+
 async function syncAllDataToDrive() {
   const payload = {
     exportedAt: new Date().toISOString(),
@@ -513,6 +533,22 @@ async function syncAllDataToDrive() {
     JSON.stringify(payload, null, 2),
     existing ? existing.id : null
   );
+}
+
+async function loadAllDataFromDrive() {
+  const existing = await findDriveFileByName(DRIVE_FILENAME);
+  if (!existing) {
+    return false;
+  }
+
+  const json = await downloadDriveJsonFile(existing.id);
+  const driveRecords = ensureArray(json.records).map((r) => normalizeRecord(r, r?.source || "drive"));
+
+  state.userRecords = driveRecords;
+  saveUserRecords();
+  syncRecords();
+
+  return true;
 }
 
 /* ===== 音声入力 ===== */
@@ -894,6 +930,7 @@ function renderMainPage() {
           <div id="speechStatus" class="muted"></div>
 
           <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button id="loadDriveBtn" class="secondary" type="button">Drive読込</button>
             <button id="generateMeetingLogBtn" class="secondary" type="button">議事録生成</button>
             <button id="saveMainBtn" class="primary" type="button">保存</button>
             <button id="clearMainBtn" class="secondary" type="button">クリア</button>
@@ -1015,6 +1052,27 @@ function bindMainEvents() {
     historySelect.addEventListener("change", () => {
       const recordId = historySelect.value || "";
       if (recordId) loadMainRecordToForm(recordId);
+    });
+  }
+
+  const loadDriveBtn = getEl("loadDriveBtn");
+  if (loadDriveBtn) {
+    loadDriveBtn.addEventListener("click", async () => {
+      const msg = getEl("mainSaveMessage");
+      try {
+        if (msg) msg.textContent = "Driveから読込中...";
+        const loaded = await loadAllDataFromDrive();
+        if (loaded) {
+          if (msg) msg.textContent = "Driveから最新データを読込みました。";
+          refreshHistorySelect();
+          refreshAIProposal();
+        } else {
+          if (msg) msg.textContent = "Driveに読込対象ファイルがありません。";
+        }
+      } catch (error) {
+        console.error(error);
+        if (msg) msg.textContent = "Drive読込に失敗しました。";
+      }
     });
   }
 
@@ -1272,4 +1330,14 @@ window.addEventListener("DOMContentLoaded", async () => {
   initTabs();
   renderMainPage();
   renderSubPage();
+
+  try {
+    await loadAllDataFromDrive();
+    renderMainPage();
+    renderSubPage();
+    const msg = getEl("mainSaveMessage");
+    if (msg) msg.textContent = "Driveの最新データを読み込みました。";
+  } catch (error) {
+    console.error("Drive自動読込スキップ", error);
+  }
 });
