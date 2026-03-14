@@ -1,4 +1,4 @@
-const STORAGE_KEY = "keiei_soudan_records_v1";
+const STORAGE_KEY = "keiei_soudan_records_v2";
 
 const GOOGLE_CLIENT_ID = "143268570956-6gkgv6efumfbqa5kue0mr2u6e2hoqghe.apps.googleusercontent.com";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
@@ -28,12 +28,19 @@ const state = {
   userRecords: [],
   records: [],
   selectedSimilarId: null,
-  currentPage: "mainPage"
+  currentPage: "mainPage",
+  editingRecordId: null
 };
 
 const driveState = {
   accessToken: null,
   tokenClient: null
+};
+
+const speechState = {
+  recognition: null,
+  activeTargetId: null,
+  isListening: false
 };
 
 function getEl(id) {
@@ -69,11 +76,19 @@ function safeText(value) {
   return String(value ?? "").trim();
 }
 
+function selectOptions(options, selected = "", includeBlank = true) {
+  const head = includeBlank ? `<option value="">選択してください</option>` : "";
+  return head + options.map(v =>
+    `<option value="${escapeHtml(v)}" ${selected === v ? "selected" : ""}>${escapeHtml(v)}</option>`
+  ).join("");
+}
+
 function normalizeRecord(record = {}, source = "json") {
   return {
     id: record.id || uniqueId(),
     source: record.source || source,
     createdAt: record.createdAt || new Date().toISOString(),
+    updatedAt: record.updatedAt || record.createdAt || new Date().toISOString(),
 
     companyName: safeText(record.companyName),
     industry: safeText(record.industry),
@@ -83,24 +98,22 @@ function normalizeRecord(record = {}, source = "json") {
 
     issue: safeText(record.issue),
     notes: safeText(record.notes),
+    advice: safeText(record.advice),
+    result: safeText(record.result),
+    nextAction: safeText(record.nextAction),
+    meetingLog: safeText(record.meetingLog),
+
     content: safeText(record.content),
 
     summary: safeText(record.summary),
     problem: safeText(record.problem),
     approach: safeText(record.approach),
     proposal: safeText(record.proposal),
-    result: safeText(record.result),
+    resultDetail: safeText(record.resultDetail),
     learning: safeText(record.learning),
     tags: safeText(record.tags),
     memo: safeText(record.memo)
   };
-}
-
-function selectOptions(options, selected = "", includeBlank = true) {
-  const head = includeBlank ? `<option value="">選択してください</option>` : "";
-  return head + options.map(v =>
-    `<option value="${escapeHtml(v)}" ${selected === v ? "selected" : ""}>${escapeHtml(v)}</option>`
-  ).join("");
 }
 
 async function loadSeedRecords() {
@@ -142,6 +155,7 @@ function getRecordSummary(record) {
     record.proposal ||
     record.content ||
     record.notes ||
+    record.meetingLog ||
     record.memo ||
     ""
   );
@@ -171,9 +185,13 @@ function extractKeywords(record) {
     record.approach,
     record.proposal,
     record.result,
+    record.resultDetail,
     record.learning,
     record.tags,
     record.notes,
+    record.advice,
+    record.nextAction,
+    record.meetingLog,
     record.memo,
     record.content
   ].join(" "));
@@ -207,6 +225,10 @@ function detectCategoryFromText(record) {
     record.proposal,
     record.tags,
     record.notes,
+    record.advice,
+    record.result,
+    record.nextAction,
+    record.meetingLog,
     record.memo,
     record.content
   ].join(" ").toLowerCase();
@@ -223,11 +245,16 @@ function detectCategoryFromText(record) {
 
 function getDraftRecord() {
   return normalizeRecord({
+    id: state.editingRecordId || uniqueId(),
     companyName: getEl("mainCompanyName")?.value || "",
     industry: getEl("mainIndustry")?.value || "",
     topic: getEl("mainTopic")?.value || "",
     issue: getEl("mainIssue")?.value || "",
     notes: getEl("mainNotes")?.value || "",
+    advice: getEl("mainAdvice")?.value || "",
+    result: getEl("mainResult")?.value || "",
+    nextAction: getEl("mainNextAction")?.value || "",
+    meetingLog: getEl("mainMeetingLog")?.value || "",
     summary: getEl("mainIssue")?.value || "",
     problem: getEl("mainIssue")?.value || "",
     memo: getEl("mainNotes")?.value || ""
@@ -265,8 +292,9 @@ function buildResourcePoints(record) {
   if (record.industry) items.push(`業種は「${record.industry}」`);
   if (record.topic) items.push(`相談テーマは「${record.topic}」`);
   if (record.notes) items.push("相談員メモから現場感のある材料がある");
+  if (record.advice) items.push("助言内容まで入力されている");
   if (!items.length) items.push("入力情報がまだ少ないため、追加ヒアリング余地がある");
-  return items.slice(0, 4);
+  return items.slice(0, 5);
 }
 
 function buildFABE(record) {
@@ -277,7 +305,7 @@ function buildFABE(record) {
   const benefit = record.topic
     ? `「${record.topic}」に対して顧客メリットへ変換できる`
     : "顧客メリットへの言い換えが必要";
-  const evidence = record.notes || record.memo || "実績・顧客の声・具体例の補強が必要";
+  const evidence = record.result || record.notes || record.memo || "実績・顧客の声・具体例の補強が必要";
 
   return { feature, advantage, benefit, evidence };
 }
@@ -335,9 +363,34 @@ function buildNextActions(record) {
   const actions = [];
   if (!record.industry) actions.push("業種を確定する");
   if (!record.topic) actions.push("相談テーマを1つに絞る");
+  if (!record.advice) actions.push("今回の助言内容を明文化する");
   actions.push("顧客が選ぶ理由を3つ言語化する");
   actions.push("今すぐ試す施策を1つ決める");
-  return [...new Set(actions)].slice(0, 3);
+  return [...new Set(actions)].slice(0, 4);
+}
+
+function buildMeetingLogText(record) {
+  const lines = [
+    "■相談概要",
+    record.issue || "未入力",
+    "",
+    "■相談者の主な課題",
+    record.issue || "未入力",
+    "",
+    "■相談員メモ",
+    record.notes || "未入力",
+    "",
+    "■今回の助言",
+    record.advice || "未入力",
+    "",
+    "■相談の成果",
+    record.result || "未入力",
+    "",
+    "■次回相談までの論点",
+    record.nextAction || "未入力"
+  ];
+
+  return lines.join("\n");
 }
 
 /* ===== Google Drive連携 ===== */
@@ -383,7 +436,6 @@ function ensureDriveToken() {
 
 async function findDriveFileByName(fileName) {
   const token = await ensureDriveToken();
-
   const escapedName = fileName.replace(/'/g, "\\'");
   const q = encodeURIComponent(`name='${escapedName}' and trashed=false`);
 
@@ -463,6 +515,123 @@ async function syncAllDataToDrive() {
   );
 }
 
+/* ===== 音声入力 ===== */
+
+function getSpeechRecognitionClass() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+function updateSpeechButtons() {
+  document.querySelectorAll(".speech-btn").forEach((btn) => {
+    const target = btn.dataset.target || "";
+    if (speechState.isListening && speechState.activeTargetId === target) {
+      btn.textContent = "■ 音声停止";
+      btn.style.background = "#9a3412";
+      btn.style.borderColor = "#9a3412";
+      btn.style.color = "#fff";
+    } else {
+      btn.textContent = "🎤 音声入力";
+      btn.style.background = "#fff";
+      btn.style.borderColor = "#1f3b64";
+      btn.style.color = "#1f3b64";
+    }
+  });
+}
+
+function appendTextToField(fieldId, text) {
+  const el = getEl(fieldId);
+  if (!el) return;
+  const current = el.value.trim();
+  el.value = current ? `${current}\n${text}` : text;
+
+  const event = new Event("input", { bubbles: true });
+  el.dispatchEvent(event);
+}
+
+function stopSpeechInput() {
+  if (speechState.recognition) {
+    speechState.recognition.stop();
+  }
+  speechState.isListening = false;
+  speechState.activeTargetId = null;
+  updateSpeechButtons();
+}
+
+function startSpeechInput(targetId) {
+  const SpeechRecognitionClass = getSpeechRecognitionClass();
+
+  if (!SpeechRecognitionClass) {
+    alert("このブラウザでは音声入力に対応していません。Chromeでお試しください。");
+    return;
+  }
+
+  if (speechState.isListening && speechState.activeTargetId === targetId) {
+    stopSpeechInput();
+    return;
+  }
+
+  if (speechState.isListening) {
+    stopSpeechInput();
+  }
+
+  const recognition = new SpeechRecognitionClass();
+  recognition.lang = "ja-JP";
+  recognition.interimResults = true;
+  recognition.continuous = true;
+
+  speechState.recognition = recognition;
+  speechState.activeTargetId = targetId;
+  speechState.isListening = true;
+  updateSpeechButtons();
+
+  let finalTranscript = "";
+
+  recognition.onresult = (event) => {
+    let interimTranscript = "";
+    for (let i = event.resultIndex; i < event.results.length; i += 1) {
+      const transcript = event.results[i][0].transcript;
+      if (event.results[i].isFinal) {
+        finalTranscript += transcript;
+      } else {
+        interimTranscript += transcript;
+      }
+    }
+
+    const previewEl = getEl("speechStatus");
+    if (previewEl) {
+      previewEl.textContent = interimTranscript
+        ? `音声認識中: ${interimTranscript}`
+        : speechState.isListening
+          ? "音声認識中..."
+          : "";
+    }
+  };
+
+  recognition.onerror = (event) => {
+    console.error("speech error", event);
+    const status = getEl("speechStatus");
+    if (status) status.textContent = `音声入力エラー: ${event.error || "不明"}`;
+    speechState.isListening = false;
+    speechState.activeTargetId = null;
+    updateSpeechButtons();
+  };
+
+  recognition.onend = () => {
+    if (finalTranscript.trim()) {
+      appendTextToField(targetId, finalTranscript.trim());
+    }
+
+    const status = getEl("speechStatus");
+    if (status) status.textContent = "";
+
+    speechState.isListening = false;
+    speechState.activeTargetId = null;
+    updateSpeechButtons();
+  };
+
+  recognition.start();
+}
+
 /* ===== AI表示 ===== */
 
 function renderSimilarCaseList(similars) {
@@ -503,10 +672,10 @@ function renderSimilarCaseDetail(record) {
       <div><strong>相談テーマ：</strong>${escapeHtml(record.topic || "")}</div>
       <div><strong>相談概要</strong><br>${nl2br(getRecordSummary(record))}</div>
       <div><strong>課題・悩み</strong><br>${nl2br(getRecordProblem(record))}</div>
-      <div><strong>支援の切り口</strong><br>${nl2br(record.approach || "")}</div>
-      <div><strong>提案内容</strong><br>${nl2br(record.proposal || "")}</div>
-      <div><strong>成果</strong><br>${nl2br(record.result || "")}</div>
-      <div><strong>学び</strong><br>${nl2br(record.learning || "")}</div>
+      <div><strong>助言</strong><br>${nl2br(record.advice || record.proposal || "")}</div>
+      <div><strong>成果</strong><br>${nl2br(record.result || record.resultDetail || "")}</div>
+      <div><strong>次回メモ</strong><br>${nl2br(record.nextAction || "")}</div>
+      <div><strong>議事録</strong><br>${nl2br(record.meetingLog || "")}</div>
       <div><strong>タグ</strong><br>${nl2br(record.tags || "")}</div>
     </div>
   `;
@@ -514,7 +683,8 @@ function renderSimilarCaseDetail(record) {
 
 function renderAIProposal() {
   const draft = getDraftRecord();
-  const hasInput = draft.companyName || draft.industry || draft.topic || draft.issue || draft.notes;
+  const hasInput =
+    draft.companyName || draft.industry || draft.topic || draft.issue || draft.notes || draft.advice;
 
   if (!hasInput) {
     return `
@@ -582,6 +752,69 @@ function renderAIProposal() {
   `;
 }
 
+/* ===== 履歴 ===== */
+
+function getCompanyHistory(companyName) {
+  const name = safeText(companyName);
+  if (!name) return [];
+  return state.userRecords
+    .filter(r => safeText(r.companyName) === name)
+    .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+}
+
+function renderHistoryOptions(companyName) {
+  const items = getCompanyHistory(companyName);
+  if (!items.length) {
+    return `<option value="">履歴なし</option>`;
+  }
+
+  return `<option value="">選択してください</option>` + items.map(item => {
+    const label = [
+      item.updatedAt ? new Date(item.updatedAt).toLocaleString("ja-JP") : "",
+      item.topic || "",
+      (item.issue || "").slice(0, 20)
+    ].filter(Boolean).join(" / ");
+
+    return `<option value="${escapeHtml(item.id)}">${escapeHtml(label)}</option>`;
+  }).join("");
+}
+
+function loadMainRecordToForm(recordId) {
+  const record = state.userRecords.find(r => r.id === recordId);
+  if (!record) return;
+
+  state.editingRecordId = record.id;
+
+  getEl("mainCompanyName").value = record.companyName || "";
+  getEl("mainIndustry").value = record.industry || "";
+  getEl("mainTopic").value = record.topic || "";
+  getEl("mainIssue").value = record.issue || "";
+  getEl("mainNotes").value = record.notes || "";
+  getEl("mainAdvice").value = record.advice || "";
+  getEl("mainResult").value = record.result || "";
+  getEl("mainNextAction").value = record.nextAction || "";
+  getEl("mainMeetingLog").value = record.meetingLog || "";
+
+  const saveMsg = getEl("mainSaveMessage");
+  if (saveMsg) saveMsg.textContent = "過去相談を読み込みました。追記して保存できます。";
+
+  refreshAIProposal();
+}
+
+function refreshHistorySelect() {
+  const companyName = getEl("mainCompanyName")?.value || "";
+  const historySelect = getEl("mainHistorySelect");
+  if (!historySelect) return;
+
+  historySelect.innerHTML = renderHistoryOptions(companyName);
+
+  if (state.editingRecordId && getCompanyHistory(companyName).some(x => x.id === state.editingRecordId)) {
+    historySelect.value = state.editingRecordId;
+  } else {
+    historySelect.value = "";
+  }
+}
+
 /* ===== 画面描画 ===== */
 
 function renderMainPage() {
@@ -599,6 +832,13 @@ function renderMainPage() {
           </div>
 
           <div>
+            <label for="mainHistorySelect">同一会社の過去相談履歴</label>
+            <select id="mainHistorySelect">
+              <option value="">会社名を入れると履歴が出ます</option>
+            </select>
+          </div>
+
+          <div>
             <label for="mainIndustry">業種</label>
             <select id="mainIndustry">
               ${selectOptions(MASTER.industries)}
@@ -613,16 +853,48 @@ function renderMainPage() {
           </div>
 
           <div>
-            <label for="mainIssue">相談者の発言</label>
+            <label for="mainIssue">相談者発言</label>
             <textarea id="mainIssue" placeholder="相手から言われたこと、相談内容など"></textarea>
+            <div style="margin-top:8px;">
+              <button type="button" class="secondary speech-btn" data-target="mainIssue">🎤 音声入力</button>
+            </div>
           </div>
 
           <div>
             <label for="mainNotes">相談員メモ</label>
-            <textarea id="mainNotes" placeholder="助言したこと、気づいたこと、次回への論点など"></textarea>
+            <textarea id="mainNotes" placeholder="気づいたこと、論点、補足メモなど"></textarea>
+            <div style="margin-top:8px;">
+              <button type="button" class="secondary speech-btn" data-target="mainNotes">🎤 音声入力</button>
+            </div>
           </div>
 
+          <div>
+            <label for="mainAdvice">助言内容</label>
+            <textarea id="mainAdvice" placeholder="こちらから何を助言したか"></textarea>
+            <div style="margin-top:8px;">
+              <button type="button" class="secondary speech-btn" data-target="mainAdvice">🎤 音声入力</button>
+            </div>
+          </div>
+
+          <div>
+            <label for="mainResult">相談の成果</label>
+            <textarea id="mainResult" placeholder="今回の相談で整理できたこと、決まったこと"></textarea>
+          </div>
+
+          <div>
+            <label for="mainNextAction">次回相談メモ</label>
+            <textarea id="mainNextAction" placeholder="次回までの宿題、次回論点"></textarea>
+          </div>
+
+          <div>
+            <label for="mainMeetingLog">議事録</label>
+            <textarea id="mainMeetingLog" placeholder="議事録生成ボタンで自動作成、手修正も可能"></textarea>
+          </div>
+
+          <div id="speechStatus" class="muted"></div>
+
           <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button id="generateMeetingLogBtn" class="secondary" type="button">議事録生成</button>
             <button id="saveMainBtn" class="primary" type="button">保存</button>
             <button id="clearMainBtn" class="secondary" type="button">クリア</button>
           </div>
@@ -641,6 +913,7 @@ function renderMainPage() {
   `;
 
   bindMainEvents();
+  refreshHistorySelect();
 }
 
 function renderSubPage() {
@@ -701,49 +974,85 @@ function renderSubPage() {
 
 /* ===== イベント ===== */
 
+function refreshAIProposal() {
+  const area = getEl("aiProposalArea");
+  if (area) area.innerHTML = renderAIProposal();
+  bindSimilarCaseButtons();
+}
+
 function bindMainEvents() {
-  ["mainCompanyName", "mainIndustry", "mainTopic", "mainIssue", "mainNotes"].forEach(id => {
+  [
+    "mainCompanyName",
+    "mainIndustry",
+    "mainTopic",
+    "mainIssue",
+    "mainNotes",
+    "mainAdvice",
+    "mainResult",
+    "mainNextAction",
+    "mainMeetingLog"
+  ].forEach(id => {
     const el = getEl(id);
-    if (el) {
-      el.addEventListener("input", () => {
-        const area = getEl("aiProposalArea");
-        if (area) area.innerHTML = renderAIProposal();
-        bindSimilarCaseButtons();
-      });
-      el.addEventListener("change", () => {
-        const area = getEl("aiProposalArea");
-        if (area) area.innerHTML = renderAIProposal();
-        bindSimilarCaseButtons();
-      });
-    }
+    if (!el) return;
+
+    el.addEventListener("input", () => {
+      if (id === "mainCompanyName") {
+        refreshHistorySelect();
+      }
+      refreshAIProposal();
+    });
+
+    el.addEventListener("change", () => {
+      if (id === "mainCompanyName") {
+        refreshHistorySelect();
+      }
+      refreshAIProposal();
+    });
   });
+
+  const historySelect = getEl("mainHistorySelect");
+  if (historySelect) {
+    historySelect.addEventListener("change", () => {
+      const recordId = historySelect.value || "";
+      if (recordId) loadMainRecordToForm(recordId);
+    });
+  }
 
   const saveBtn = getEl("saveMainBtn");
   if (saveBtn) saveBtn.addEventListener("click", handleSaveMainRecord);
 
   const clearBtn = getEl("clearMainBtn");
-  if (clearBtn) clearBtn.addEventListener("click", () => {
-    ["mainCompanyName", "mainIndustry", "mainTopic", "mainIssue", "mainNotes"].forEach(id => {
-      const el = getEl(id);
-      if (el) el.value = "";
+  if (clearBtn) {
+    clearBtn.addEventListener("click", clearMainForm);
+  }
+
+  const logBtn = getEl("generateMeetingLogBtn");
+  if (logBtn) {
+    logBtn.addEventListener("click", () => {
+      const draft = getDraftRecord();
+      getEl("mainMeetingLog").value = buildMeetingLogText(draft);
+      const msg = getEl("mainSaveMessage");
+      if (msg) msg.textContent = "議事録を生成しました。必要に応じて修正してください。";
+      refreshAIProposal();
     });
-    state.selectedSimilarId = null;
-    const msg = getEl("mainSaveMessage");
-    if (msg) msg.textContent = "";
-    const area = getEl("aiProposalArea");
-    if (area) area.innerHTML = renderAIProposal();
+  }
+
+  document.querySelectorAll(".speech-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const targetId = btn.dataset.target || "";
+      if (targetId) startSpeechInput(targetId);
+    });
   });
 
   bindSimilarCaseButtons();
+  updateSpeechButtons();
 }
 
 function bindSimilarCaseButtons() {
   document.querySelectorAll(".case-button").forEach(btn => {
     btn.addEventListener("click", () => {
       state.selectedSimilarId = btn.dataset.caseId || null;
-      const area = getEl("aiProposalArea");
-      if (area) area.innerHTML = renderAIProposal();
-      bindSimilarCaseButtons();
+      refreshAIProposal();
     });
   });
 }
@@ -753,20 +1062,56 @@ function bindSubEvents() {
   if (saveBtn) saveBtn.addEventListener("click", handleSaveSubRecord);
 
   const clearBtn = getEl("clearSubBtn");
-  if (clearBtn) clearBtn.addEventListener("click", () => {
-    [
-      "subCompanyName", "subIndustry", "subCategory", "subTopic",
-      "subRecordType", "subContent", "subTags"
-    ].forEach(id => {
-      const el = getEl(id);
-      if (el) el.value = "";
+  if (clearBtn) {
+    clearBtn.addEventListener("click", () => {
+      [
+        "subCompanyName", "subIndustry", "subCategory", "subTopic",
+        "subRecordType", "subContent", "subTags"
+      ].forEach(id => {
+        const el = getEl(id);
+        if (el) el.value = "";
+      });
+      const msg = getEl("subSaveMessage");
+      if (msg) msg.textContent = "";
     });
-    const msg = getEl("subSaveMessage");
-    if (msg) msg.textContent = "";
-  });
+  }
 }
 
 /* ===== 保存 ===== */
+
+function clearMainForm() {
+  [
+    "mainCompanyName",
+    "mainIndustry",
+    "mainTopic",
+    "mainIssue",
+    "mainNotes",
+    "mainAdvice",
+    "mainResult",
+    "mainNextAction",
+    "mainMeetingLog"
+  ].forEach(id => {
+    const el = getEl(id);
+    if (el) el.value = "";
+  });
+
+  state.selectedSimilarId = null;
+  state.editingRecordId = null;
+
+  const historySelect = getEl("mainHistorySelect");
+  if (historySelect) {
+    historySelect.innerHTML = `<option value="">会社名を入れると履歴が出ます</option>`;
+  }
+
+  const msg = getEl("mainSaveMessage");
+  if (msg) msg.textContent = "";
+
+  const speechStatus = getEl("speechStatus");
+  if (speechStatus) speechStatus.textContent = "";
+
+  stopSpeechInput();
+  refreshAIProposal();
+}
 
 async function handleSaveMainRecord() {
   const companyName = safeText(getEl("mainCompanyName")?.value);
@@ -774,13 +1119,20 @@ async function handleSaveMainRecord() {
   const topic = safeText(getEl("mainTopic")?.value);
   const issue = safeText(getEl("mainIssue")?.value);
   const notes = safeText(getEl("mainNotes")?.value);
+  const advice = safeText(getEl("mainAdvice")?.value);
+  const result = safeText(getEl("mainResult")?.value);
+  const nextAction = safeText(getEl("mainNextAction")?.value);
+  const meetingLog = safeText(getEl("mainMeetingLog")?.value);
 
   if (!companyName && !issue) {
-    alert("会社名または相談者の発言を入力してください。");
+    alert("会社名または相談者発言を入力してください。");
     return;
   }
 
+  const now = new Date().toISOString();
+
   const record = normalizeRecord({
+    id: state.editingRecordId || uniqueId(),
     companyName,
     industry,
     topic,
@@ -788,31 +1140,56 @@ async function handleSaveMainRecord() {
     recordType: "面談",
     issue,
     notes,
+    advice,
+    result,
+    nextAction,
+    meetingLog,
     summary: issue,
     problem: issue,
     memo: notes,
-    tags: topic,
-    source: "main"
+    tags: [topic, industry].filter(Boolean).join(", "),
+    source: "main",
+    updatedAt: now
   }, "main");
 
-  state.userRecords.push(record);
+  const existingIndex = state.userRecords.findIndex(r => r.id === record.id);
+
+  if (existingIndex >= 0) {
+    const previous = state.userRecords[existingIndex];
+    state.userRecords[existingIndex] = {
+      ...previous,
+      ...record,
+      createdAt: previous.createdAt || record.createdAt,
+      updatedAt: now
+    };
+  } else {
+    state.userRecords.push(record);
+  }
+
   saveUserRecords();
   syncRecords();
+  state.editingRecordId = record.id;
 
   try {
     await syncAllDataToDrive();
     const msg = getEl("mainSaveMessage");
-    if (msg) msg.textContent = "保存しました（Drive同期済み）。";
+    if (msg) {
+      msg.textContent = existingIndex >= 0
+        ? "更新しました（Drive同期済み）。"
+        : "保存しました（Drive同期済み）。";
+    }
   } catch (error) {
     console.error(error);
     const msg = getEl("mainSaveMessage");
-    if (msg) msg.textContent = "ローカル保存は完了。Drive同期は失敗。";
+    if (msg) {
+      msg.textContent = existingIndex >= 0
+        ? "更新は完了。Drive同期は失敗。"
+        : "ローカル保存は完了。Drive同期は失敗。";
+    }
   }
 
-  state.selectedSimilarId = null;
-  const area = getEl("aiProposalArea");
-  if (area) area.innerHTML = renderAIProposal();
-  bindSimilarCaseButtons();
+  refreshHistorySelect();
+  refreshAIProposal();
 }
 
 async function handleSaveSubRecord() {
@@ -829,6 +1206,8 @@ async function handleSaveSubRecord() {
     return;
   }
 
+  const now = new Date().toISOString();
+
   const record = normalizeRecord({
     companyName,
     industry,
@@ -840,7 +1219,8 @@ async function handleSaveSubRecord() {
     problem: content,
     notes: content,
     tags,
-    source: "sub"
+    source: "sub",
+    updatedAt: now
   }, "sub");
 
   state.userRecords.push(record);
