@@ -1,12 +1,8 @@
 const STORAGE_KEY = "keiei_soudan_records_v1";
+
 const GOOGLE_CLIENT_ID = "143268570956-6gkgv6efumfbqa5kue0mr2u6e2hoqghe.apps.googleusercontent.com";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const DRIVE_FILENAME = "keiei_soudan_records.json";
-
-const driveState = {
-  accessToken: null,
-  tokenClient: null
-};
 
 const MASTER = {
   industries: [
@@ -34,125 +30,11 @@ const state = {
   selectedSimilarId: null,
   currentPage: "mainPage"
 };
-function initDriveClient() {
-  if (!window.google || !google.accounts || !google.accounts.oauth2) return;
 
-  driveState.tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: GOOGLE_CLIENT_ID,
-    scope: DRIVE_SCOPE,
-    callback: (response) => {
-      if (response && response.access_token) {
-        driveState.accessToken = response.access_token;
-      }
-    }
-  });
-}
-
-function ensureDriveToken() {
-  return new Promise((resolve, reject) => {
-    if (driveState.accessToken) {
-      resolve(driveState.accessToken);
-      return;
-    }
-
-    if (!driveState.tokenClient) {
-      reject(new Error("Drive認証クライアントが初期化されていません。"));
-      return;
-    }
-
-    driveState.tokenClient.callback = (response) => {
-      if (response && response.access_token) {
-        driveState.accessToken = response.access_token;
-        resolve(response.access_token);
-      } else {
-        reject(new Error("Drive認証に失敗しました。"));
-      }
-    };
-
-    driveState.tokenClient.requestAccessToken({ prompt: "consent" });
-  });
-}
-
-async function findDriveFileByName(fileName) {
-  const token = await ensureDriveToken();
-
-  const q = encodeURIComponent(
-    `name='${fileName.replaceAll("'", "\\'")}' and trashed=false`
-  );
-
-  const res = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
-    }
-  );
-
-  if (!res.ok) {
-    throw new Error("Drive上の既存ファイル検索に失敗しました。");
-  }
-
-  const data = await res.json();
-  return (data.files && data.files[0]) || null;
-}
-
-async function uploadJsonToDrive(fileName, jsonText, existingFileId = null) {
-  const token = await ensureDriveToken();
-
-  const metadata = {
-    name: fileName,
-    mimeType: "application/json"
-  };
-
-  const boundary = "-------314159265358979323846";
-  const delimiter = `\r\n--${boundary}\r\n`;
-  const closeDelim = `\r\n--${boundary}--`;
-
-  const body =
-    delimiter +
-    "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
-    JSON.stringify(metadata) +
-    delimiter +
-    "Content-Type: application/json\r\n\r\n" +
-    jsonText +
-    closeDelim;
-
-  const url = existingFileId
-    ? `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=multipart`
-    : `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart`;
-
-  const method = existingFileId ? "PATCH" : "POST";
-
-  const res = await fetch(url, {
-    method,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": `multipart/related; boundary=${boundary}`
-    },
-    body
-  });
-
-  if (!res.ok) {
-    throw new Error("Driveへの保存に失敗しました。");
-  }
-
-  return await res.json();
-}
-
-async function syncAllDataToDrive() {
-  const payload = {
-    exportedAt: new Date().toISOString(),
-    records: state.records
-  };
-
-  const existing = await findDriveFileByName(DRIVE_FILENAME);
-  return await uploadJsonToDrive(
-    DRIVE_FILENAME,
-    JSON.stringify(payload, null, 2),
-    existing ? existing.id : null
-  );
-}
+const driveState = {
+  accessToken: null,
+  tokenClient: null
+};
 
 function getEl(id) {
   return document.getElementById(id);
@@ -458,6 +340,131 @@ function buildNextActions(record) {
   return [...new Set(actions)].slice(0, 3);
 }
 
+/* ===== Google Drive連携 ===== */
+
+function initDriveClient() {
+  if (!window.google || !google.accounts || !google.accounts.oauth2) return;
+
+  driveState.tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: DRIVE_SCOPE,
+    callback: (response) => {
+      if (response && response.access_token) {
+        driveState.accessToken = response.access_token;
+      }
+    }
+  });
+}
+
+function ensureDriveToken() {
+  return new Promise((resolve, reject) => {
+    if (driveState.accessToken) {
+      resolve(driveState.accessToken);
+      return;
+    }
+
+    if (!driveState.tokenClient) {
+      reject(new Error("Drive認証クライアントが初期化されていません。"));
+      return;
+    }
+
+    driveState.tokenClient.callback = (response) => {
+      if (response && response.access_token) {
+        driveState.accessToken = response.access_token;
+        resolve(response.access_token);
+      } else {
+        reject(new Error("Drive認証に失敗しました。"));
+      }
+    };
+
+    driveState.tokenClient.requestAccessToken({ prompt: "consent" });
+  });
+}
+
+async function findDriveFileByName(fileName) {
+  const token = await ensureDriveToken();
+
+  const escapedName = fileName.replace(/'/g, "\\'");
+  const q = encodeURIComponent(`name='${escapedName}' and trashed=false`);
+
+  const res = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    }
+  );
+
+  if (!res.ok) {
+    throw new Error("Drive上の既存ファイル検索に失敗しました。");
+  }
+
+  const data = await res.json();
+  return (data.files && data.files[0]) || null;
+}
+
+async function uploadJsonToDrive(fileName, jsonText, existingFileId = null) {
+  const token = await ensureDriveToken();
+
+  const metadata = {
+    name: fileName,
+    mimeType: "application/json"
+  };
+
+  const boundary = "-------314159265358979323846";
+  const delimiter = `\r\n--${boundary}\r\n`;
+  const closeDelim = `\r\n--${boundary}--`;
+
+  const body =
+    delimiter +
+    "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
+    JSON.stringify(metadata) +
+    delimiter +
+    "Content-Type: application/json\r\n\r\n" +
+    jsonText +
+    closeDelim;
+
+  const url = existingFileId
+    ? `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=multipart`
+    : `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart`;
+
+  const method = existingFileId ? "PATCH" : "POST";
+
+  const res = await fetch(url, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": `multipart/related; boundary=${boundary}`
+    },
+    body
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`Driveへの保存に失敗しました: ${errorText}`);
+  }
+
+  return await res.json();
+}
+
+async function syncAllDataToDrive() {
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    records: state.records
+  };
+
+  const existing = await findDriveFileByName(DRIVE_FILENAME);
+
+  return await uploadJsonToDrive(
+    DRIVE_FILENAME,
+    JSON.stringify(payload, null, 2),
+    existing ? existing.id : null
+  );
+}
+
+/* ===== AI表示 ===== */
+
 function renderSimilarCaseList(similars) {
   if (!similars.length) {
     return `<div class="muted">類似事例はまだ見つかっていません。</div>`;
@@ -575,6 +582,8 @@ function renderAIProposal() {
   `;
 }
 
+/* ===== 画面描画 ===== */
+
 function renderMainPage() {
   const mainPage = getEl("mainPage");
   if (!mainPage) return;
@@ -690,6 +699,8 @@ function renderSubPage() {
   bindSubEvents();
 }
 
+/* ===== イベント ===== */
+
 function bindMainEvents() {
   ["mainCompanyName", "mainIndustry", "mainTopic", "mainIssue", "mainNotes"].forEach(id => {
     const el = getEl(id);
@@ -755,7 +766,9 @@ function bindSubEvents() {
   });
 }
 
-function handleSaveMainRecord() {
+/* ===== 保存 ===== */
+
+async function handleSaveMainRecord() {
   const companyName = safeText(getEl("mainCompanyName")?.value);
   const industry = safeText(getEl("mainIndustry")?.value);
   const topic = safeText(getEl("mainTopic")?.value);
@@ -786,8 +799,15 @@ function handleSaveMainRecord() {
   saveUserRecords();
   syncRecords();
 
-  const msg = getEl("mainSaveMessage");
-  if (msg) msg.textContent = "保存しました。";
+  try {
+    await syncAllDataToDrive();
+    const msg = getEl("mainSaveMessage");
+    if (msg) msg.textContent = "保存しました（Drive同期済み）。";
+  } catch (error) {
+    console.error(error);
+    const msg = getEl("mainSaveMessage");
+    if (msg) msg.textContent = "ローカル保存は完了。Drive同期は失敗。";
+  }
 
   state.selectedSimilarId = null;
   const area = getEl("aiProposalArea");
@@ -795,7 +815,7 @@ function handleSaveMainRecord() {
   bindSimilarCaseButtons();
 }
 
-function handleSaveSubRecord() {
+async function handleSaveSubRecord() {
   const companyName = safeText(getEl("subCompanyName")?.value);
   const industry = safeText(getEl("subIndustry")?.value);
   const category = safeText(getEl("subCategory")?.value);
@@ -827,9 +847,18 @@ function handleSaveSubRecord() {
   saveUserRecords();
   syncRecords();
 
-  const msg = getEl("subSaveMessage");
-  if (msg) msg.textContent = "保存しました。";
+  try {
+    await syncAllDataToDrive();
+    const msg = getEl("subSaveMessage");
+    if (msg) msg.textContent = "保存しました（Drive同期済み）。";
+  } catch (error) {
+    console.error(error);
+    const msg = getEl("subSaveMessage");
+    if (msg) msg.textContent = "ローカル保存は完了。Drive同期は失敗。";
+  }
 }
+
+/* ===== タブ ===== */
 
 function initTabs() {
   const buttons = document.querySelectorAll(".nav-tab");
@@ -853,10 +882,13 @@ function initTabs() {
   if (subPage) subPage.classList.remove("active");
 }
 
+/* ===== 初期化 ===== */
+
 window.addEventListener("DOMContentLoaded", async () => {
   loadUserRecords();
   await loadSeedRecords();
   syncRecords();
+  initDriveClient();
   initTabs();
   renderMainPage();
   renderSubPage();
