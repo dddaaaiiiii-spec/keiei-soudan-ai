@@ -1,13 +1,30 @@
-const STORAGE_KEY = "keiei_soudan_records";
+const STORAGE_KEY = "keiei_soudan_records_v1";
+
+const MASTER = {
+  industries: [
+    "製造", "卸売", "小売", "飲食", "宿泊", "サービス", "建設", "不動産", "運輸",
+    "医療", "福祉", "教育", "IT", "デザイン", "士業", "観光", "農業", "食品加工",
+    "生活サービス", "文化娯楽", "その他"
+  ],
+  topics: [
+    "売上拡大", "集客", "販路開拓", "新商品", "新サービス", "ブランディング", "SNS", "PR",
+    "値上げ", "利益改善", "リピート", "ターゲット整理", "強み整理", "創業", "事業承継",
+    "補助金", "資金繰り", "採用", "業務改善", "DX", "その他"
+  ],
+  categories: [
+    "相談記録", "議事録", "調査メモ", "参考事例", "アイデア", "提案メモ"
+  ],
+  recordTypes: [
+    "面談", "電話", "オンライン", "訪問", "自主調査", "参考事例", "Web情報"
+  ]
+};
 
 const state = {
   seedRecords: [],
   userRecords: [],
   records: [],
-  currentPage: "mainPage",
-  selectedRecordId: null,
-  filterCategory: "",
-  filterIndustry: ""
+  selectedSimilarId: null,
+  currentPage: "mainPage"
 };
 
 function getEl(id) {
@@ -28,7 +45,14 @@ function escapeHtml(str) {
 }
 
 function nl2br(str) {
-  return escapeHtml(str).replace(/\n/g, "<br>");
+  return escapeHtml(str ?? "").replace(/\n/g, "<br>");
+}
+
+function uniqueId() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
 function safeText(value) {
@@ -36,36 +60,21 @@ function safeText(value) {
   return String(value ?? "").trim();
 }
 
-function uniqueSorted(values) {
-  return [...new Set(values.filter(Boolean))].sort((a, b) =>
-    String(a).localeCompare(String(b), "ja")
-  );
-}
-
-function tokenize(text) {
-  return String(text || "")
-    .toLowerCase()
-    .replace(/[、。,.!！?？/\\()\[\]「」『』【】・:：;；]/g, " ")
-    .split(/\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
 function normalizeRecord(record = {}, source = "json") {
   return {
-    id:
-      record.id ||
-      (typeof crypto !== "undefined" && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `id_${Date.now()}_${Math.random().toString(16).slice(2)}`),
-    createdAt: record.createdAt || new Date().toISOString(),
+    id: record.id || uniqueId(),
     source: record.source || source,
+    createdAt: record.createdAt || new Date().toISOString(),
 
     companyName: safeText(record.companyName),
     industry: safeText(record.industry),
+    topic: safeText(record.topic),
+    category: safeText(record.category),
+    recordType: safeText(record.recordType),
 
     issue: safeText(record.issue),
     notes: safeText(record.notes),
+    content: safeText(record.content),
 
     summary: safeText(record.summary),
     problem: safeText(record.problem),
@@ -78,20 +87,21 @@ function normalizeRecord(record = {}, source = "json") {
   };
 }
 
-function mergeRecords(seedRecords, userRecords) {
-  return [...ensureArray(seedRecords), ...ensureArray(userRecords)].map((r, i) =>
-    normalizeRecord(r, r?.source || (i < ensureArray(seedRecords).length ? "json" : "local"))
-  );
+function selectOptions(options, selected = "", includeBlank = true) {
+  const head = includeBlank ? `<option value="">選択してください</option>` : "";
+  return head + options.map(v =>
+    `<option value="${escapeHtml(v)}" ${selected === v ? "selected" : ""}>${escapeHtml(v)}</option>`
+  ).join("");
 }
 
 async function loadSeedRecords() {
   try {
-    const response = await fetch("src/cases_full.json", { cache: "no-store" });
-    if (!response.ok) throw new Error(`cases_full.json load error: ${response.status}`);
-    const data = await response.json();
-    state.seedRecords = ensureArray(data).map((r) => normalizeRecord(r, "json"));
-  } catch (error) {
-    console.error("cases_full.json 読込失敗", error);
+    const res = await fetch("src/cases_full.json", { cache: "no-store" });
+    if (!res.ok) throw new Error(`load error ${res.status}`);
+    const data = await res.json();
+    state.seedRecords = ensureArray(data).map(r => normalizeRecord(r, "json"));
+  } catch (e) {
+    console.error("cases_full.json 読込失敗", e);
     state.seedRecords = [];
   }
 }
@@ -100,9 +110,9 @@ function loadUserRecords() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
-    state.userRecords = ensureArray(parsed).map((r) => normalizeRecord(r, "local"));
-  } catch (error) {
-    console.error("localStorage 読込失敗", error);
+    state.userRecords = ensureArray(parsed).map(r => normalizeRecord(r, "local"));
+  } catch (e) {
+    console.error("localStorage 読込失敗", e);
     state.userRecords = [];
   }
 }
@@ -112,48 +122,40 @@ function saveUserRecords() {
 }
 
 function syncRecords() {
-  state.records = mergeRecords(state.seedRecords, state.userRecords);
+  state.records = [...state.seedRecords, ...state.userRecords];
 }
 
 function getRecordSummary(record) {
-  return record.summary || record.issue || record.problem || record.proposal || record.notes || "";
+  return (
+    record.summary ||
+    record.issue ||
+    record.problem ||
+    record.proposal ||
+    record.content ||
+    record.notes ||
+    record.memo ||
+    ""
+  );
 }
 
 function getRecordProblem(record) {
-  return record.problem || record.issue || "";
+  return record.problem || record.issue || record.content || "";
 }
 
-function classifyConsultation(record) {
-  const text = [
-    record.industry,
-    record.summary,
-    record.issue,
-    record.problem,
-    record.approach,
-    record.proposal,
-    record.result,
-    record.learning,
-    record.tags,
-    record.notes,
-    record.memo
-  ]
-    .join(" ")
-    .toLowerCase();
-
-  if (/創業|開業|起業|立ち上げ|新規/.test(text)) return "創業・立上げ";
-  if (/集客|販促|広告|sns|インスタ|instagram|web|ホームページ|認知|宣伝/.test(text)) return "集客・販促";
-  if (/価格|値上げ|単価|粗利|利益率|収益/.test(text)) return "価格・収益改善";
-  if (/採用|人材|教育|育成|定着|人手不足|組織/.test(text)) return "人材・組織";
-  if (/補助金|資金|融資|借入|資金繰り|財務/.test(text)) return "資金・財務";
-  if (/商品|サービス|メニュー|ブランド|企画|差別化/.test(text)) return "商品・サービス改善";
-  if (/業務|効率|オペレーション|dx|システム|自動化/.test(text)) return "業務改善・DX";
-  return "経営全般";
+function tokenize(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/[、。,.!！?？/\\()\[\]「」『』【】・:：;；]/g, " ")
+    .split(/\s+/)
+    .map(s => s.trim())
+    .filter(Boolean);
 }
 
 function extractKeywords(record) {
-  const text = [
+  const words = tokenize([
     record.companyName,
     record.industry,
+    record.topic,
     record.summary,
     record.issue,
     record.problem,
@@ -163,14 +165,13 @@ function extractKeywords(record) {
     record.learning,
     record.tags,
     record.notes,
-    record.memo
-  ].join(" ");
+    record.memo,
+    record.content
+  ].join(" "));
 
-  const words = tokenize(text);
   const stopWords = new Set([
     "する", "して", "いる", "ある", "こと", "ため", "よう", "です", "ます",
-    "について", "など", "また", "その", "この", "相談", "内容", "提案", "課題",
-    "検討", "実施", "必要", "改善", "強化", "向上"
+    "相談", "内容", "提案", "課題", "検討", "実施", "改善", "強化", "向上"
   ]);
 
   const counts = {};
@@ -186,10 +187,50 @@ function extractKeywords(record) {
     .map(([word]) => word);
 }
 
+function detectCategoryFromText(record) {
+  const text = [
+    record.topic,
+    record.industry,
+    record.summary,
+    record.issue,
+    record.problem,
+    record.approach,
+    record.proposal,
+    record.tags,
+    record.notes,
+    record.memo,
+    record.content
+  ].join(" ").toLowerCase();
+
+  if (/創業|開業|起業/.test(text)) return "創業";
+  if (/売上|集客|販促|広告|sns|インスタ|pr|認知/.test(text)) return "集客・販促";
+  if (/価格|値上げ|粗利|利益/.test(text)) return "価格・利益";
+  if (/商品|サービス|ブランド|新商品|新サービス/.test(text)) return "商品・サービス";
+  if (/採用|人材|教育|定着/.test(text)) return "人材";
+  if (/補助金|融資|資金繰り|資金/.test(text)) return "資金";
+  if (/業務|dx|効率|オペレーション/.test(text)) return "業務改善";
+  return "経営全般";
+}
+
+function getDraftRecord() {
+  return normalizeRecord({
+    companyName: getEl("mainCompanyName")?.value || "",
+    industry: getEl("mainIndustry")?.value || "",
+    topic: getEl("mainTopic")?.value || "",
+    issue: getEl("mainIssue")?.value || "",
+    notes: getEl("mainNotes")?.value || "",
+    summary: getEl("mainIssue")?.value || "",
+    problem: getEl("mainIssue")?.value || "",
+    memo: getEl("mainNotes")?.value || ""
+  }, "draft");
+}
+
 function similarityScore(a, b) {
   let score = 0;
+
   if (a.industry && b.industry && a.industry === b.industry) score += 3;
-  if (classifyConsultation(a) === classifyConsultation(b)) score += 2;
+  if (a.topic && b.topic && a.topic === b.topic) score += 3;
+  if (detectCategoryFromText(a) === detectCategoryFromText(b)) score += 2;
 
   const aWords = new Set(extractKeywords(a));
   const bWords = new Set(extractKeywords(b));
@@ -200,251 +241,209 @@ function similarityScore(a, b) {
   return score;
 }
 
-function findSimilarRecords(target, records, limit = 5) {
-  return ensureArray(records)
-    .filter((r) => r.id !== target.id)
-    .map((r) => ({ ...r, _score: similarityScore(target, r) }))
-    .filter((r) => r._score > 0)
+function findSimilarRecords(target, limit = 5) {
+  return state.records
+    .filter(r => r.id !== target.id)
+    .map(r => ({ ...r, _score: similarityScore(target, r) }))
+    .filter(r => r._score > 0)
     .sort((a, b) => b._score - a._score)
     .slice(0, limit);
 }
 
-function buildProposal(record) {
-  const text = [
-    record.industry,
-    record.summary,
-    record.issue,
-    record.problem,
-    record.approach,
-    record.proposal,
-    record.tags,
-    record.notes
-  ]
-    .join(" ")
-    .toLowerCase();
-
-  const suggestions = [];
-
-  if (/売上|集客|販促|広告|認知|web|sns|インスタ|instagram/.test(text)) {
-    suggestions.push("顧客像を絞り、訴求軸を明確化する");
-    suggestions.push("既存客の再来店・再購入導線を先に整える");
-    suggestions.push("SNS・店頭・紹介の役割分担を整理する");
-  }
-
-  if (/価格|値上げ|単価|粗利|利益/.test(text)) {
-    suggestions.push("値上げではなく価値の見せ方変更も含めて検討する");
-    suggestions.push("商品別の粗利と売れ筋を分けて見る");
-    suggestions.push("高粗利商品への誘導導線を作る");
-  }
-
-  if (/商品|サービス|メニュー|差別化|ブランド/.test(text)) {
-    suggestions.push("誰向けかを絞り、選ばれる理由を言語化する");
-    suggestions.push("用途別・価格別に商品構成を整理する");
-    suggestions.push("競合比較ではなく独自背景や強みを前面化する");
-  }
-
-  if (/採用|人材|教育|定着/.test(text)) {
-    suggestions.push("仕事内容の見せ方と採用導線を見直す");
-    suggestions.push("定着理由と離職理由を分けて整理する");
-    suggestions.push("教育負担の少ない受入導線を作る");
-  }
-
-  if (/補助金|資金|融資|資金繰り/.test(text)) {
-    suggestions.push("資金使途と回収計画を先に明確化する");
-    suggestions.push("補助金ありきではなく事業計画を先に整理する");
-    suggestions.push("投資優先順位をつけて必要額を絞る");
-  }
-
-  if (/開業|創業|起業/.test(text)) {
-    suggestions.push("顧客像・提供価値・販売導線の3点を固める");
-    suggestions.push("小さく検証できる商品から始める");
-    suggestions.push("固定費を抑えた立ち上げ方を優先する");
-  }
-
-  if (suggestions.length === 0) {
-    suggestions.push("課題を顧客・商品・導線・収益の4視点で分解する");
-    suggestions.push("優先順位の高い打ち手を1つに絞る");
-    suggestions.push("短期で試せる施策から着手する");
-  }
-
-  return suggestions.slice(0, 3);
+function buildResourcePoints(record) {
+  const items = [];
+  if (record.companyName) items.push(`対象企業は「${record.companyName}」`);
+  if (record.industry) items.push(`業種は「${record.industry}」`);
+  if (record.topic) items.push(`相談テーマは「${record.topic}」`);
+  if (record.notes) items.push("相談員メモから現場感のある材料がある");
+  if (!items.length) items.push("入力情報がまだ少ないため、追加ヒアリング余地がある");
+  return items.slice(0, 4);
 }
 
-function currentDraft() {
-  return normalizeRecord({
-    companyName: getEl("companyName")?.value?.trim() || "",
-    industry: getEl("industry")?.value?.trim() || "",
-    issue: getEl("issue")?.value?.trim() || "",
-    notes: getEl("notes")?.value?.trim() || "",
-    summary: getEl("issue")?.value?.trim() || "",
-    problem: getEl("issue")?.value?.trim() || "",
-    memo: getEl("notes")?.value?.trim() || ""
-  }, "draft");
+function buildFABE(record) {
+  const feature = record.issue || "現状の相談内容を整理中";
+  const advantage = record.industry
+    ? `${record.industry}ならではの提供価値を整理できる`
+    : "提供内容の特徴整理が必要";
+  const benefit = record.topic
+    ? `「${record.topic}」に対して顧客メリットへ変換できる`
+    : "顧客メリットへの言い換えが必要";
+  const evidence = record.notes || record.memo || "実績・顧客の声・具体例の補強が必要";
+
+  return { feature, advantage, benefit, evidence };
 }
 
-function getUniqueCategories() {
-  return uniqueSorted(state.records.map((r) => classifyConsultation(r)));
-}
+function buildAdviceDirections(record) {
+  const results = [];
+  const topic = record.topic;
+  const industry = record.industry;
 
-function getUniqueIndustries(category = "") {
-  const filtered = category
-    ? state.records.filter((r) => classifyConsultation(r) === category)
-    : state.records;
-
-  return uniqueSorted(filtered.map((r) => r.industry));
-}
-
-function getFilteredRecords(category = "", industry = "") {
-  if (!category && !industry) return [];
-  return state.records.filter((record) => {
-    if (category && classifyConsultation(record) !== category) return false;
-    if (industry && record.industry !== industry) return false;
-    return true;
-  });
-}
-
-function renderAIProposal() {
-  const draft = currentDraft();
-  const hasInput =
-    draft.companyName || draft.industry || draft.issue || draft.notes;
-
-  if (!hasInput) {
-    return `
-      <div style="border:1px solid #ccc;border-radius:10px;padding:14px;background:#fff;">
-        <h3 style="margin:0 0 10px 0;">AI提案</h3>
-        <p style="margin:0;">入力すると、分類・キーワード・打ち手候補・類似事例を表示します。</p>
-      </div>
-    `;
+  if (topic === "集客" || topic === "売上拡大" || topic === "SNS" || topic === "PR") {
+    results.push("ターゲットを絞り、誰に向けた訴求かを明確にする");
+    results.push("強みを顧客ベネフィットに言い換えて見せ方を変える");
+    results.push("店頭・紹介・SNSの役割分担を整理する");
   }
 
-  const category = classifyConsultation(draft);
-  const keywords = extractKeywords(draft);
-  const proposals = buildProposal(draft);
-  const similars = findSimilarRecords(draft, state.records, 3);
+  if (topic === "値上げ" || topic === "利益改善") {
+    results.push("価格ではなく価値の伝え方を先に整える");
+    results.push("高粗利商品の比率を上げる導線を検討する");
+  }
+
+  if (topic === "新商品" || topic === "新サービス" || topic === "ブランディング") {
+    results.push("弱みの言い換えや偏愛の事業化を検討する");
+    results.push("競合比較ではなく独自背景を前面に出す");
+  }
+
+  if (topic === "販路開拓") {
+    results.push("既存市場ではなく別市場への転用可能性を探る");
+    results.push("連携先・紹介先・異業種コラボを検討する");
+  }
+
+  if (topic === "創業") {
+    results.push("小さく試せる商品から始めて反応を確認する");
+    results.push("誰のどの悩みを解決するかを先に固定する");
+  }
+
+  if (topic === "採用") {
+    results.push("仕事内容の魅力をベネフィットで表現する");
+    results.push("教育しやすい受入設計を先に考える");
+  }
+
+  if (industry === "観光" || industry === "飲食" || industry === "小売") {
+    results.push("体験価値・写真映え・口コミ導線を意識する");
+  }
+
+  if (results.length === 0) {
+    results.push("リソースの棚卸しから始め、強みを言語化する");
+    results.push("ターゲットを狭めて、一番刺さる訴求を試す");
+    results.push("今すぐ試せる小さな打ち手を1つ決める");
+  }
+
+  return [...new Set(results)].slice(0, 4);
+}
+
+function buildNextActions(record) {
+  const actions = [];
+  if (!record.industry) actions.push("業種を確定する");
+  if (!record.topic) actions.push("相談テーマを1つに絞る");
+  actions.push("顧客が選ぶ理由を3つ言語化する");
+  actions.push("今すぐ試す施策を1つ決める");
+  return [...new Set(actions)].slice(0, 3);
+}
+
+function renderSimilarCaseList(similars) {
+  if (!similars.length) {
+    return `<div class="muted">類似事例はまだ見つかっていません。</div>`;
+  }
+
+  if (!state.selectedSimilarId || !similars.some(x => x.id === state.selectedSimilarId)) {
+    state.selectedSimilarId = similars[0].id;
+  }
 
   return `
-    <div style="border:1px solid #ccc;border-radius:10px;padding:14px;background:#fff;">
-      <h3 style="margin:0 0 10px 0;">AI提案</h3>
-
-      <div style="display:grid;gap:10px;font-size:14px;line-height:1.6;">
-        <div><strong>分類：</strong>${escapeHtml(category)}</div>
-        <div><strong>キーワード：</strong>${keywords.length ? keywords.map(escapeHtml).join(" / ") : "なし"}</div>
-
-        <div>
-          <strong>打ち手候補</strong>
-          <ol style="margin:6px 0 0 20px;padding:0;">
-            ${proposals.map((p) => `<li>${escapeHtml(p)}</li>`).join("")}
-          </ol>
-        </div>
-
-        <div>
-          <strong>参考になる類似事例</strong>
-          ${
-            similars.length === 0
-              ? `<div style="margin-top:6px;">該当なし</div>`
-              : `
-                <div style="margin-top:6px;display:grid;gap:6px;">
-                  ${similars
-                    .map(
-                      (s) => `
-                        <div style="border:1px solid #ddd;border-radius:8px;padding:8px;background:#fafafa;">
-                          <div style="font-weight:700;">${escapeHtml(s.companyName || "会社名未入力")}</div>
-                          <div style="font-size:12px;color:#555;">${escapeHtml(classifyConsultation(s))} / ${escapeHtml(s.industry || "業種未入力")}</div>
-                        </div>
-                      `
-                    )
-                    .join("")}
-                </div>
-              `
-          }
-        </div>
-      </div>
+    <div class="case-list">
+      ${similars.map(item => `
+        <button
+          type="button"
+          class="case-button ${item.id === state.selectedSimilarId ? "active" : ""}"
+          data-case-id="${escapeHtml(item.id)}"
+        >
+          <div><strong>${escapeHtml(item.companyName || "会社名未入力")}</strong></div>
+          <div class="muted">${escapeHtml(item.industry || "業種未入力")} / ${escapeHtml(item.topic || detectCategoryFromText(item))}</div>
+          <div class="muted">${escapeHtml(getRecordSummary(item).slice(0, 56))}</div>
+        </button>
+      `).join("")}
     </div>
   `;
 }
 
-function renderRecordList(records) {
-  if (!state.filterCategory && !state.filterIndustry) {
-    state.selectedRecordId = null;
-    return `<div style="color:#666;">分類または業種を選択してください。</div>`;
-  }
-
-  if (!records.length) {
-    state.selectedRecordId = null;
-    return `<div style="color:#666;">該当事例がありません。</div>`;
-  }
-
-  const selectedExists = records.some((r) => r.id === state.selectedRecordId);
-  if (!selectedExists) {
-    state.selectedRecordId = records[0].id;
-  }
-
-  return `
-    <div style="display:grid;gap:8px;max-height:520px;overflow:auto;">
-      ${records
-        .map((record) => {
-          const active = record.id === state.selectedRecordId;
-          return `
-            <button
-              type="button"
-              class="record-item"
-              data-record-id="${escapeHtml(record.id)}"
-              style="
-                width:100%;
-                text-align:left;
-                padding:10px;
-                border:1px solid ${active ? "#1d3b64" : "#ccc"};
-                background:${active ? "#eef4fb" : "#fff"};
-                border-radius:8px;
-                cursor:pointer;
-              "
-            >
-              <div style="font-weight:700;">${escapeHtml(record.companyName || "会社名未入力")}</div>
-              <div style="font-size:12px;color:#555;margin-top:4px;">
-                ${escapeHtml(classifyConsultation(record))} / ${escapeHtml(record.industry || "業種未入力")}
-              </div>
-              <div style="font-size:12px;color:#666;margin-top:4px;">
-                ${escapeHtml(getRecordSummary(record).slice(0, 70))}
-              </div>
-            </button>
-          `;
-        })
-        .join("")}
-    </div>
-  `;
-}
-
-function renderRecordDetail(record) {
-  if (!state.filterCategory && !state.filterIndustry) {
-    return `
-      <h3 style="margin-top:0;">事例詳細</h3>
-      <p>分類または業種を選択してください。</p>
-    `;
-  }
-
+function renderSimilarCaseDetail(record) {
   if (!record) {
-    return `
-      <h3 style="margin-top:0;">事例詳細</h3>
-      <p>該当事例がありません。</p>
-    `;
+    return `<div class="muted">一覧から事例を選ぶと詳細が出ます。</div>`;
   }
 
   return `
-    <h3 style="margin-top:0;">事例詳細</h3>
-
-    <div style="display:grid;gap:10px;font-size:14px;line-height:1.6;">
+    <div class="detail-grid">
       <div><strong>会社名：</strong>${escapeHtml(record.companyName || "")}</div>
       <div><strong>業種：</strong>${escapeHtml(record.industry || "")}</div>
-      <div><strong>分類：</strong>${escapeHtml(classifyConsultation(record))}</div>
-
+      <div><strong>相談テーマ：</strong>${escapeHtml(record.topic || "")}</div>
       <div><strong>相談概要</strong><br>${nl2br(getRecordSummary(record))}</div>
       <div><strong>課題・悩み</strong><br>${nl2br(getRecordProblem(record))}</div>
       <div><strong>支援の切り口</strong><br>${nl2br(record.approach || "")}</div>
       <div><strong>提案内容</strong><br>${nl2br(record.proposal || "")}</div>
       <div><strong>成果</strong><br>${nl2br(record.result || "")}</div>
-      <div><strong>学び・ポイント</strong><br>${nl2br(record.learning || "")}</div>
-      <div><strong>関連キーワード</strong><br>${nl2br(record.tags || "")}</div>
-      ${(record.notes || record.memo) ? `<div><strong>メモ</strong><br>${nl2br(record.notes || record.memo || "")}</div>` : ""}
+      <div><strong>学び</strong><br>${nl2br(record.learning || "")}</div>
+      <div><strong>タグ</strong><br>${nl2br(record.tags || "")}</div>
+    </div>
+  `;
+}
+
+function renderAIProposal() {
+  const draft = getDraftRecord();
+  const hasInput = draft.companyName || draft.industry || draft.topic || draft.issue || draft.notes;
+
+  if (!hasInput) {
+    return `
+      <div class="ai-section">
+        <div class="ai-block">
+          <h4>AI提案</h4>
+          <div class="muted">左側に入力すると、ここに相談整理・FABE・助言方向性・類似事例が表示されます。</div>
+        </div>
+      </div>
+    `;
+  }
+
+  const resourcePoints = buildResourcePoints(draft);
+  const fabe = buildFABE(draft);
+  const advice = buildAdviceDirections(draft);
+  const similars = findSimilarRecords(draft, 5);
+  const selected = similars.find(x => x.id === state.selectedSimilarId) || similars[0] || null;
+  const nextActions = buildNextActions(draft);
+
+  return `
+    <div class="ai-section">
+      <div class="ai-block">
+        <h4>① 相談整理</h4>
+        <div>${escapeHtml(draft.issue || "相談内容を入力してください")}</div>
+      </div>
+
+      <div class="ai-block">
+        <h4>② リソース抽出</h4>
+        <ul>${resourcePoints.map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul>
+      </div>
+
+      <div class="ai-block">
+        <h4>③ FABE整理</h4>
+        <div><strong>F：</strong>${escapeHtml(fabe.feature)}</div>
+        <div><strong>A：</strong>${escapeHtml(fabe.advantage)}</div>
+        <div><strong>B：</strong>${escapeHtml(fabe.benefit)}</div>
+        <div><strong>E：</strong>${escapeHtml(fabe.evidence)}</div>
+      </div>
+
+      <div class="ai-block">
+        <h4>④ 助言方向性</h4>
+        <ul>${advice.map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul>
+      </div>
+
+      <div class="ai-block">
+        <h4>⑤ 類似事例</h4>
+        ${renderSimilarCaseList(similars)}
+      </div>
+
+      <div class="ai-block">
+        <h4>類似事例の詳細</h4>
+        ${renderSimilarCaseDetail(selected)}
+      </div>
+
+      <div class="ai-block">
+        <h4>⑥ Web類似モデル</h4>
+        <div class="muted">この版では未接続です。次段階でWeb参照を追加します。</div>
+      </div>
+
+      <div class="ai-block">
+        <h4>⑦ 次の一手</h4>
+        <ul>${nextActions.map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul>
+      </div>
     </div>
   `;
 }
@@ -453,262 +452,278 @@ function renderMainPage() {
   const mainPage = getEl("mainPage");
   if (!mainPage) return;
 
-  const categories = getUniqueCategories();
-  const industries = getUniqueIndustries(state.filterCategory);
-  const filteredRecords = getFilteredRecords(state.filterCategory, state.filterIndustry);
-  const selectedRecord =
-    state.records.find((r) => r.id === state.selectedRecordId && filteredRecords.some((x) => x.id === r.id)) ||
-    filteredRecords[0] ||
-    null;
-
-  if (selectedRecord) {
-    state.selectedRecordId = selectedRecord.id;
-  }
-
   mainPage.innerHTML = `
-    <section style="padding:16px;">
-      <div style="display:grid;grid-template-columns:minmax(0, 1.5fr) minmax(340px, 0.95fr);gap:20px;align-items:start;">
-        
-        <div style="display:grid;gap:14px;">
-          <div style="border:1px solid #ccc;border-radius:10px;padding:16px;background:#fff;">
-            <h2 style="margin-top:0;">相談入力</h2>
-
-            <div style="display:grid;gap:12px;">
-              <div>
-                <label>会社名</label>
-                <input id="companyName" type="text" style="width:100%;padding:8px;box-sizing:border-box;">
-              </div>
-
-              <div>
-                <label>業種</label>
-                <input id="industry" type="text" style="width:100%;padding:8px;box-sizing:border-box;">
-              </div>
-
-              <div>
-                <label>相談内容</label>
-                <textarea id="issue" style="width:100%;min-height:120px;padding:8px;box-sizing:border-box;"></textarea>
-              </div>
-
-              <div>
-                <label>メモ</label>
-                <textarea id="notes" style="width:100%;min-height:120px;padding:8px;box-sizing:border-box;"></textarea>
-              </div>
-
-              <div>
-                <button id="saveRecordBtn" type="button" style="padding:10px 16px;">保存</button>
-              </div>
-            </div>
+    <div class="two-column">
+      <div class="card">
+        <h2>相談入力</h2>
+        <div class="form-grid">
+          <div>
+            <label for="mainCompanyName">会社名</label>
+            <input id="mainCompanyName" type="text" placeholder="会社名を入力">
           </div>
 
-          <div id="aiProposalArea">
-            ${renderAIProposal()}
-          </div>
-        </div>
-
-        <div style="display:grid;gap:14px;">
-          <div style="border:1px solid #ccc;border-radius:10px;padding:14px;background:#fff;">
-            <h3 style="margin:0 0 12px 0;">蓄積データ抽出</h3>
-
-            <div style="display:grid;gap:12px;">
-              <div>
-                <label for="filterCategory"><strong>分類</strong></label>
-                <select id="filterCategory" style="width:100%;padding:8px;margin-top:6px;box-sizing:border-box;">
-                  <option value="">すべて</option>
-                  ${categories.map((c) => `<option value="${escapeHtml(c)}" ${state.filterCategory === c ? "selected" : ""}>${escapeHtml(c)}</option>`).join("")}
-                </select>
-              </div>
-
-              <div>
-                <label for="filterIndustry"><strong>業種</strong></label>
-                <select id="filterIndustry" style="width:100%;padding:8px;margin-top:6px;box-sizing:border-box;">
-                  <option value="">すべて</option>
-                  ${industries.map((i) => `<option value="${escapeHtml(i)}" ${state.filterIndustry === i ? "selected" : ""}>${escapeHtml(i)}</option>`).join("")}
-                </select>
-              </div>
-
-              <div>
-                <strong>該当事例一覧</strong>
-                <div id="recordListArea" style="margin-top:8px;">
-                  ${renderRecordList(filteredRecords)}
-                </div>
-              </div>
-            </div>
+          <div>
+            <label for="mainIndustry">業種</label>
+            <select id="mainIndustry">
+              ${selectOptions(MASTER.industries)}
+            </select>
           </div>
 
-          <div id="recordDetailArea" style="border:1px solid #ccc;border-radius:10px;padding:14px;background:#fff;">
-            ${renderRecordDetail(selectedRecord)}
+          <div>
+            <label for="mainTopic">相談テーマ</label>
+            <select id="mainTopic">
+              ${selectOptions(MASTER.topics)}
+            </select>
           </div>
+
+          <div>
+            <label for="mainIssue">相談者の発言</label>
+            <textarea id="mainIssue" placeholder="相手から言われたこと、相談内容など"></textarea>
+          </div>
+
+          <div>
+            <label for="mainNotes">相談員メモ</label>
+            <textarea id="mainNotes" placeholder="助言したこと、気づいたこと、次回への論点など"></textarea>
+          </div>
+
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button id="saveMainBtn" class="primary" type="button">保存</button>
+            <button id="clearMainBtn" class="secondary" type="button">クリア</button>
+          </div>
+
+          <div id="mainSaveMessage" class="success-message"></div>
         </div>
       </div>
-    </section>
+
+      <div class="card">
+        <h2>AI提案</h2>
+        <div id="aiProposalArea">
+          ${renderAIProposal()}
+        </div>
+      </div>
+    </div>
   `;
 
-  const saveBtn = getEl("saveRecordBtn");
-  if (saveBtn) {
-    saveBtn.onclick = handleSaveRecord;
-  }
+  bindMainEvents();
+}
 
-  ["companyName", "industry", "issue", "notes"].forEach((id) => {
+function renderSubPage() {
+  const subPage = getEl("subPage");
+  if (!subPage) return;
+
+  subPage.innerHTML = `
+    <div class="card" style="max-width:900px;">
+      <h2>サブページ（蓄積用）</h2>
+      <div class="form-grid">
+        <div>
+          <label for="subCompanyName">会社名</label>
+          <input id="subCompanyName" type="text" placeholder="会社名を入力">
+        </div>
+
+        <div>
+          <label for="subIndustry">業種</label>
+          <select id="subIndustry">${selectOptions(MASTER.industries)}</select>
+        </div>
+
+        <div>
+          <label for="subCategory">分類</label>
+          <select id="subCategory">${selectOptions(MASTER.categories)}</select>
+        </div>
+
+        <div>
+          <label for="subTopic">相談テーマ</label>
+          <select id="subTopic">${selectOptions(MASTER.topics)}</select>
+        </div>
+
+        <div>
+          <label for="subRecordType">記録種別</label>
+          <select id="subRecordType">${selectOptions(MASTER.recordTypes)}</select>
+        </div>
+
+        <div>
+          <label for="subContent">内容</label>
+          <textarea id="subContent" placeholder="他で調べたこと、参考事例、気づきなど"></textarea>
+        </div>
+
+        <div>
+          <label for="subTags">タグ</label>
+          <input id="subTags" type="text" placeholder="例：価格戦略, 観光, SNS">
+        </div>
+
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button id="saveSubBtn" class="primary" type="button">保存</button>
+          <button id="clearSubBtn" class="secondary" type="button">クリア</button>
+        </div>
+
+        <div id="subSaveMessage" class="success-message"></div>
+      </div>
+    </div>
+  `;
+
+  bindSubEvents();
+}
+
+function bindMainEvents() {
+  ["mainCompanyName", "mainIndustry", "mainTopic", "mainIssue", "mainNotes"].forEach(id => {
     const el = getEl(id);
     if (el) {
       el.addEventListener("input", () => {
-        const aiArea = getEl("aiProposalArea");
-        if (aiArea) aiArea.innerHTML = renderAIProposal();
+        const area = getEl("aiProposalArea");
+        if (area) area.innerHTML = renderAIProposal();
+        bindSimilarCaseButtons();
+      });
+      el.addEventListener("change", () => {
+        const area = getEl("aiProposalArea");
+        if (area) area.innerHTML = renderAIProposal();
+        bindSimilarCaseButtons();
       });
     }
   });
 
-  const categorySelect = getEl("filterCategory");
-  const industrySelect = getEl("filterIndustry");
+  const saveBtn = getEl("saveMainBtn");
+  if (saveBtn) saveBtn.addEventListener("click", handleSaveMainRecord);
 
-  if (categorySelect) {
-    categorySelect.addEventListener("change", () => {
-      state.filterCategory = categorySelect.value || "";
-      const newIndustries = getUniqueIndustries(state.filterCategory);
-
-      if (industrySelect) {
-        if (!newIndustries.includes(state.filterIndustry)) {
-          state.filterIndustry = "";
-        }
-
-        industrySelect.innerHTML = `
-          <option value="">すべて</option>
-          ${newIndustries.map((i) => `<option value="${escapeHtml(i)}" ${state.filterIndustry === i ? "selected" : ""}>${escapeHtml(i)}</option>`).join("")}
-        `;
-      }
-
-      state.selectedRecordId = null;
-      refreshFilteredPanel();
+  const clearBtn = getEl("clearMainBtn");
+  if (clearBtn) clearBtn.addEventListener("click", () => {
+    ["mainCompanyName", "mainIndustry", "mainTopic", "mainIssue", "mainNotes"].forEach(id => {
+      const el = getEl(id);
+      if (el) el.value = "";
     });
-  }
+    state.selectedSimilarId = null;
+    const msg = getEl("mainSaveMessage");
+    if (msg) msg.textContent = "";
+    const area = getEl("aiProposalArea");
+    if (area) area.innerHTML = renderAIProposal();
+  });
 
-  if (industrySelect) {
-    industrySelect.addEventListener("change", () => {
-      state.filterIndustry = industrySelect.value || "";
-      state.selectedRecordId = null;
-      refreshFilteredPanel();
-    });
-  }
-
-  bindRecordListEvents();
+  bindSimilarCaseButtons();
 }
 
-function refreshFilteredPanel() {
-  const records = getFilteredRecords(state.filterCategory, state.filterIndustry);
-
-  const listArea = getEl("recordListArea");
-  if (listArea) {
-    listArea.innerHTML = renderRecordList(records);
-  }
-
-  const selectedRecord =
-    state.records.find((r) => r.id === state.selectedRecordId && records.some((x) => x.id === r.id)) ||
-    records[0] ||
-    null;
-
-  state.selectedRecordId = selectedRecord ? selectedRecord.id : null;
-
-  const detailArea = getEl("recordDetailArea");
-  if (detailArea) {
-    detailArea.innerHTML = renderRecordDetail(selectedRecord);
-  }
-
-  bindRecordListEvents();
-}
-
-function bindRecordListEvents() {
-  document.querySelectorAll(".record-item").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.selectedRecordId = button.dataset.recordId || null;
-      refreshFilteredPanel();
+function bindSimilarCaseButtons() {
+  document.querySelectorAll(".case-button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      state.selectedSimilarId = btn.dataset.caseId || null;
+      const area = getEl("aiProposalArea");
+      if (area) area.innerHTML = renderAIProposal();
+      bindSimilarCaseButtons();
     });
   });
 }
 
-function renderImportPage() {
-  const importPage = getEl("importPage");
-  if (!importPage) return;
+function bindSubEvents() {
+  const saveBtn = getEl("saveSubBtn");
+  if (saveBtn) saveBtn.addEventListener("click", handleSaveSubRecord);
 
-  importPage.innerHTML = `
-    <section style="padding:16px;">
-      <div style="border:1px solid #ccc;border-radius:10px;padding:16px;background:#fff;">
-        <h2 style="margin-top:0;">蓄積ページ</h2>
-        <p>ここは今後、PDF / Word / 音声 / 画像の取り込みに対応します。</p>
-      </div>
-    </section>
-  `;
+  const clearBtn = getEl("clearSubBtn");
+  if (clearBtn) clearBtn.addEventListener("click", () => {
+    [
+      "subCompanyName", "subIndustry", "subCategory", "subTopic",
+      "subRecordType", "subContent", "subTags"
+    ].forEach(id => {
+      const el = getEl(id);
+      if (el) el.value = "";
+    });
+    const msg = getEl("subSaveMessage");
+    if (msg) msg.textContent = "";
+  });
 }
 
-function handleSaveRecord() {
-  const companyName = getEl("companyName")?.value?.trim() || "";
-  const industry = getEl("industry")?.value?.trim() || "";
-  const issue = getEl("issue")?.value?.trim() || "";
-  const notes = getEl("notes")?.value?.trim() || "";
+function handleSaveMainRecord() {
+  const companyName = safeText(getEl("mainCompanyName")?.value);
+  const industry = safeText(getEl("mainIndustry")?.value);
+  const topic = safeText(getEl("mainTopic")?.value);
+  const issue = safeText(getEl("mainIssue")?.value);
+  const notes = safeText(getEl("mainNotes")?.value);
 
   if (!companyName && !issue) {
-    alert("会社名または相談内容を入力してください。");
+    alert("会社名または相談者の発言を入力してください。");
     return;
   }
 
-  const record = normalizeRecord(
-    {
-      companyName,
-      industry,
-      issue,
-      notes,
-      summary: issue,
-      problem: issue,
-      memo: notes,
-      source: "main"
-    },
-    "main"
-  );
+  const record = normalizeRecord({
+    companyName,
+    industry,
+    topic,
+    category: "相談記録",
+    recordType: "面談",
+    issue,
+    notes,
+    summary: issue,
+    problem: issue,
+    memo: notes,
+    tags: topic,
+    source: "main"
+  }, "main");
 
   state.userRecords.push(record);
   saveUserRecords();
   syncRecords();
 
-  getEl("companyName").value = "";
-  getEl("industry").value = "";
-  getEl("issue").value = "";
-  getEl("notes").value = "";
+  const msg = getEl("mainSaveMessage");
+  if (msg) msg.textContent = "保存しました。";
 
-  const aiArea = getEl("aiProposalArea");
-  if (aiArea) aiArea.innerHTML = renderAIProposal();
+  state.selectedSimilarId = null;
+  const area = getEl("aiProposalArea");
+  if (area) area.innerHTML = renderAIProposal();
+  bindSimilarCaseButtons();
+}
 
-  if (!state.filterCategory && !state.filterIndustry) {
-    state.filterCategory = classifyConsultation(record);
-    state.filterIndustry = record.industry || "";
+function handleSaveSubRecord() {
+  const companyName = safeText(getEl("subCompanyName")?.value);
+  const industry = safeText(getEl("subIndustry")?.value);
+  const category = safeText(getEl("subCategory")?.value);
+  const topic = safeText(getEl("subTopic")?.value);
+  const recordType = safeText(getEl("subRecordType")?.value);
+  const content = safeText(getEl("subContent")?.value);
+  const tags = safeText(getEl("subTags")?.value);
+
+  if (!companyName && !content) {
+    alert("会社名または内容を入力してください。");
+    return;
   }
 
-  state.selectedRecordId = record.id;
-  renderMainPage();
+  const record = normalizeRecord({
+    companyName,
+    industry,
+    category,
+    topic,
+    recordType,
+    content,
+    summary: content,
+    problem: content,
+    notes: content,
+    tags,
+    source: "sub"
+  }, "sub");
+
+  state.userRecords.push(record);
+  saveUserRecords();
+  syncRecords();
+
+  const msg = getEl("subSaveMessage");
+  if (msg) msg.textContent = "保存しました。";
 }
 
 function initTabs() {
-  const tabButtons = document.querySelectorAll(".nav-tab");
+  const buttons = document.querySelectorAll(".nav-tab");
   const mainPage = getEl("mainPage");
-  const importPage = getEl("importPage");
+  const subPage = getEl("subPage");
 
-  tabButtons.forEach((btn) => {
+  buttons.forEach(btn => {
     btn.addEventListener("click", () => {
       const page = btn.dataset.page;
-
-      tabButtons.forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-
-      if (mainPage) mainPage.style.display = page === "mainPage" ? "block" : "none";
-      if (importPage) importPage.style.display = page === "importPage" ? "block" : "none";
-
       state.currentPage = page;
 
-      if (page === "mainPage") renderMainPage();
-      if (page === "importPage") renderImportPage();
+      buttons.forEach(x => x.classList.remove("active"));
+      btn.classList.add("active");
+
+      if (mainPage) mainPage.classList.toggle("active", page === "mainPage");
+      if (subPage) subPage.classList.toggle("active", page === "subPage");
     });
   });
 
-  if (mainPage) mainPage.style.display = "block";
-  if (importPage) importPage.style.display = "none";
+  if (mainPage) mainPage.classList.add("active");
+  if (subPage) subPage.classList.remove("active");
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
@@ -717,5 +732,5 @@ window.addEventListener("DOMContentLoaded", async () => {
   syncRecords();
   initTabs();
   renderMainPage();
-  renderImportPage();
+  renderSubPage();
 });
