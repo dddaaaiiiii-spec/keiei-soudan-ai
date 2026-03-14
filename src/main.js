@@ -1,4 +1,12 @@
 const STORAGE_KEY = "keiei_soudan_records_v1";
+const GOOGLE_CLIENT_ID = "143268570956-6gkgv6efumfbqa5kue0mr2u6e2hoqghe.apps.googleusercontent.com";
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const DRIVE_FILENAME = "keiei_soudan_records.json";
+
+const driveState = {
+  accessToken: null,
+  tokenClient: null
+};
 
 const MASTER = {
   industries: [
