@@ -1,8 +1,11 @@
-const STORAGE_KEY = "keiei_soudan_records_v2";
+const STORAGE_KEY = "keiei_soudan_records_v3";
 
 const GOOGLE_CLIENT_ID = "143268570956-6gkgv6efumfbqa5kue0mr2u6e2hoqghe.apps.googleusercontent.com";
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const DRIVE_FILENAME = "keiei_soudan_records.json";
+
+const GOOGLE_API_KEY = "AIzaSyBgLnIp0xtf1U9vi6hSqTMXY7PY7CIOEIk";
+const GOOGLE_CX = "6727bc25a4ebb430d";
 
 const MASTER = {
   industries: [
@@ -29,7 +32,8 @@ const state = {
   records: [],
   selectedSimilarId: null,
   currentPage: "mainPage",
-  editingRecordId: null
+  editingRecordId: null,
+  webResearchCache: {}
 };
 
 const driveState = {
@@ -551,6 +555,155 @@ async function loadAllDataFromDrive() {
   return true;
 }
 
+/* ===== Web検索 ===== */
+
+function buildBusinessModelQuery(record) {
+  const parts = [
+    record.industry,
+    record.topic,
+    extractKeywords(record).slice(0, 3).join(" "),
+    "ビジネスモデル 事例"
+  ].filter(Boolean);
+
+  return parts.join(" ");
+}
+
+function buildTrendQuery(record) {
+  const year = new Date().getFullYear();
+  const parts = [
+    record.industry,
+    record.topic,
+    "トレンド 最新",
+    String(year)
+  ].filter(Boolean);
+
+  return parts.join(" ");
+}
+
+async function runGoogleSearch(query, num = 5) {
+  if (!query) return [];
+
+  const url = `https://www.googleapis.com/customsearch/v1?key=${encodeURIComponent(GOOGLE_API_KEY)}&cx=${encodeURIComponent(GOOGLE_CX)}&q=${encodeURIComponent(query)}&num=${num}`;
+
+  const res = await fetch(url);
+  const data = await res.json();
+
+  if (!res.ok) {
+    const message = data?.error?.message || "Web検索に失敗しました。";
+    throw new Error(message);
+  }
+
+  return ensureArray(data.items).map((item) => ({
+    title: item.title || "",
+    link: item.link || "",
+    snippet: item.snippet || ""
+  }));
+}
+
+async function getWebResearch(record) {
+  const cacheKey = JSON.stringify({
+    industry: record.industry,
+    topic: record.topic,
+    issue: record.issue,
+    advice: record.advice
+  });
+
+  if (state.webResearchCache[cacheKey]) {
+    return state.webResearchCache[cacheKey];
+  }
+
+  const modelQuery = buildBusinessModelQuery(record);
+  const trendQuery = buildTrendQuery(record);
+
+  const [models, trends] = await Promise.all([
+    runGoogleSearch(modelQuery, 5),
+    runGoogleSearch(trendQuery, 5)
+  ]);
+
+  const result = { models, trends, modelQuery, trendQuery };
+  state.webResearchCache[cacheKey] = result;
+  return result;
+}
+
+function renderWebSearchItems(items) {
+  if (!items.length) {
+    return `<div class="muted">該当するWeb情報が見つかりませんでした。</div>`;
+  }
+
+  return `
+    <div style="display:grid;gap:10px;">
+      ${items.map((item) => `
+        <div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;background:#fff;">
+          <div style="font-weight:700;">${escapeHtml(item.title)}</div>
+          <div class="muted" style="margin-top:6px;">${escapeHtml(item.snippet)}</div>
+          <div style="margin-top:8px;">
+            <a href="${escapeHtml(item.link)}" target="_blank" rel="noopener noreferrer">記事を見る</a>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function setWebResearchLoading() {
+  const modelsBox = getEl("webModelsArea");
+  const trendsBox = getEl("webTrendsArea");
+  const queryBox = getEl("webQueryInfo");
+
+  if (modelsBox) modelsBox.innerHTML = `<div class="muted">検索中...</div>`;
+  if (trendsBox) trendsBox.innerHTML = `<div class="muted">検索中...</div>`;
+  if (queryBox) queryBox.textContent = "";
+}
+
+function setWebResearchEmpty() {
+  const modelsBox = getEl("webModelsArea");
+  const trendsBox = getEl("webTrendsArea");
+  const queryBox = getEl("webQueryInfo");
+
+  if (modelsBox) modelsBox.innerHTML = `<div class="muted">業種・相談テーマ・相談内容を入れると表示します。</div>`;
+  if (trendsBox) trendsBox.innerHTML = `<div class="muted">業種・相談テーマ・相談内容を入れると表示します。</div>`;
+  if (queryBox) queryBox.textContent = "";
+}
+
+async function refreshWebResearch() {
+  const draft = getDraftRecord();
+  const hasInput = draft.industry || draft.topic || draft.issue;
+
+  if (!hasInput) {
+    setWebResearchEmpty();
+    return;
+  }
+
+  setWebResearchLoading();
+
+  try {
+    const result = await getWebResearch(draft);
+
+    const modelsBox = getEl("webModelsArea");
+    const trendsBox = getEl("webTrendsArea");
+    const queryBox = getEl("webQueryInfo");
+
+    if (queryBox) {
+      queryBox.textContent = `検索語：${result.modelQuery} / ${result.trendQuery}`;
+    }
+    if (modelsBox) {
+      modelsBox.innerHTML = renderWebSearchItems(result.models);
+    }
+    if (trendsBox) {
+      trendsBox.innerHTML = renderWebSearchItems(result.trends);
+    }
+  } catch (error) {
+    console.error(error);
+    const modelsBox = getEl("webModelsArea");
+    const trendsBox = getEl("webTrendsArea");
+    const queryBox = getEl("webQueryInfo");
+
+    if (queryBox) queryBox.textContent = "";
+    if (modelsBox) modelsBox.innerHTML = `<div class="muted">Web検索に失敗しました。</div>`;
+    if (trendsBox) trendsBox.innerHTML = `<div class="muted">${escapeHtml(error.message || "Web検索に失敗しました。")}</div>`;
+  }
+}
+
 /* ===== 音声入力 ===== */
 
 function getSpeechRecognitionClass() {
@@ -777,7 +930,13 @@ function renderAIProposal() {
 
       <div class="ai-block">
         <h4>⑥ Web類似モデル</h4>
-        <div class="muted">この版では未接続です。次段階でWeb参照を追加します。</div>
+        <div id="webQueryInfo" class="muted" style="margin-bottom:8px;"></div>
+        <div id="webModelsArea" class="muted">業種・相談テーマ・相談内容を入れると表示します。</div>
+      </div>
+
+      <div class="ai-block">
+        <h4>⑥-2 Webトレンド</h4>
+        <div id="webTrendsArea" class="muted">業種・相談テーマ・相談内容を入れると表示します。</div>
       </div>
 
       <div class="ai-block">
@@ -951,6 +1110,7 @@ function renderMainPage() {
 
   bindMainEvents();
   refreshHistorySelect();
+  refreshWebResearch();
 }
 
 function renderSubPage() {
@@ -1015,6 +1175,7 @@ function refreshAIProposal() {
   const area = getEl("aiProposalArea");
   if (area) area.innerHTML = renderAIProposal();
   bindSimilarCaseButtons();
+  refreshWebResearch();
 }
 
 function bindMainEvents() {
