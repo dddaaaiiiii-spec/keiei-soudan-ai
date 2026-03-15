@@ -18,12 +18,8 @@ const MASTER = {
     "値上げ", "利益改善", "リピート", "ターゲット整理", "強み整理", "創業", "事業承継",
     "補助金", "資金繰り", "採用", "業務改善", "DX", "その他"
   ],
-  categories: [
-    "相談記録", "議事録", "調査メモ", "参考事例", "アイデア", "提案メモ"
-  ],
-  recordTypes: [
-    "面談", "電話", "オンライン", "訪問", "自主調査", "参考事例", "Web情報"
-  ]
+  categories: ["相談記録", "議事録", "調査メモ", "参考事例", "アイデア", "提案メモ"],
+  recordTypes: ["面談", "電話", "オンライン", "訪問", "自主調査", "参考事例", "Web情報"]
 };
 
 const state = {
@@ -85,7 +81,7 @@ function safeText(value) {
 
 function selectOptions(options, selected = "", includeBlank = true) {
   const head = includeBlank ? `<option value="">選択してください</option>` : "";
-  return head + options.map(v =>
+  return head + options.map((v) =>
     `<option value="${escapeHtml(v)}" ${selected === v ? "selected" : ""}>${escapeHtml(v)}</option>`
   ).join("");
 }
@@ -128,7 +124,7 @@ async function loadSeedRecords() {
     const res = await fetch("src/cases_full.json", { cache: "no-store" });
     if (!res.ok) throw new Error(`load error ${res.status}`);
     const data = await res.json();
-    state.seedRecords = ensureArray(data).map(r => normalizeRecord(r, "json"));
+    state.seedRecords = ensureArray(data).map((r) => normalizeRecord(r, "json"));
   } catch (e) {
     console.error("cases_full.json 読込失敗", e);
     state.seedRecords = [];
@@ -139,7 +135,7 @@ function loadUserRecords() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
-    state.userRecords = ensureArray(parsed).map(r => normalizeRecord(r, "local"));
+    state.userRecords = ensureArray(parsed).map((r) => normalizeRecord(r, "local"));
   } catch (e) {
     console.error("localStorage 読込失敗", e);
     state.userRecords = [];
@@ -177,7 +173,7 @@ function tokenize(text) {
     .toLowerCase()
     .replace(/[、。,.!！?？/\\()\[\]「」『』【】・:：;；]/g, " ")
     .split(/\s+/)
-    .map(s => s.trim())
+    .map((s) => s.trim())
     .filter(Boolean);
 }
 
@@ -270,7 +266,6 @@ function getDraftRecord() {
 
 function similarityScore(a, b) {
   let score = 0;
-
   if (a.industry && b.industry && a.industry === b.industry) score += 3;
   if (a.topic && b.topic && a.topic === b.topic) score += 3;
   if (detectCategoryFromText(a) === detectCategoryFromText(b)) score += 2;
@@ -280,15 +275,14 @@ function similarityScore(a, b) {
   for (const w of aWords) {
     if (bWords.has(w)) score += 1;
   }
-
   return score;
 }
 
 function findSimilarRecords(target, limit = 5) {
   return state.records
-    .filter(r => r.id !== target.id)
-    .map(r => ({ ...r, _score: similarityScore(target, r) }))
-    .filter(r => r._score > 0)
+    .filter((r) => r.id !== target.id)
+    .map((r) => ({ ...r, _score: similarityScore(target, r) }))
+    .filter((r) => r._score > 0)
     .sort((a, b) => b._score - a._score)
     .slice(0, limit);
 }
@@ -313,7 +307,6 @@ function buildFABE(record) {
     ? `「${record.topic}」に対して顧客メリットへ変換できる`
     : "顧客メリットへの言い換えが必要";
   const evidence = record.result || record.notes || record.memo || "実績・顧客の声・具体例の補強が必要";
-
   return { feature, advantage, benefit, evidence };
 }
 
@@ -327,42 +320,34 @@ function buildAdviceDirections(record) {
     results.push("強みを顧客ベネフィットに言い換えて見せ方を変える");
     results.push("店頭・紹介・SNSの役割分担を整理する");
   }
-
   if (topic === "値上げ" || topic === "利益改善") {
     results.push("価格ではなく価値の伝え方を先に整える");
     results.push("高粗利商品の比率を上げる導線を検討する");
   }
-
   if (topic === "新商品" || topic === "新サービス" || topic === "ブランディング") {
     results.push("弱みの言い換えや偏愛の事業化を検討する");
     results.push("競合比較ではなく独自背景を前面に出す");
   }
-
   if (topic === "販路開拓") {
     results.push("既存市場ではなく別市場への転用可能性を探る");
     results.push("連携先・紹介先・異業種コラボを検討する");
   }
-
   if (topic === "創業") {
     results.push("小さく試せる商品から始めて反応を確認する");
     results.push("誰のどの悩みを解決するかを先に固定する");
   }
-
   if (topic === "採用") {
     results.push("仕事内容の魅力をベネフィットで表現する");
     results.push("教育しやすい受入設計を先に考える");
   }
-
   if (industry === "観光" || industry === "飲食" || industry === "小売") {
     results.push("体験価値・写真映え・口コミ導線を意識する");
   }
-
   if (results.length === 0) {
     results.push("リソースの棚卸しから始め、強みを言語化する");
     results.push("ターゲットを狭めて、一番刺さる訴求を試す");
     results.push("今すぐ試せる小さな打ち手を1つ決める");
   }
-
   return [...new Set(results)].slice(0, 4);
 }
 
@@ -396,7 +381,6 @@ function buildMeetingLogText(record) {
     "■次回相談までの論点",
     record.nextAction || "未入力"
   ];
-
   return lines.join("\n");
 }
 
@@ -422,7 +406,6 @@ function ensureDriveToken() {
       resolve(driveState.accessToken);
       return;
     }
-
     if (!driveState.tokenClient) {
       reject(new Error("Drive認証クライアントが初期化されていません。"));
       return;
@@ -448,17 +431,10 @@ async function findDriveFileByName(fileName) {
 
   const res = await fetch(
     `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
-    }
+    { headers: { Authorization: `Bearer ${token}` } }
   );
 
-  if (!res.ok) {
-    throw new Error("Drive上の既存ファイル検索に失敗しました。");
-  }
-
+  if (!res.ok) throw new Error("Drive上の既存ファイル検索に失敗しました。");
   const data = await res.json();
   return (data.files && data.files[0]) || null;
 }
@@ -466,11 +442,7 @@ async function findDriveFileByName(fileName) {
 async function uploadJsonToDrive(fileName, jsonText, existingFileId = null) {
   const token = await ensureDriveToken();
 
-  const metadata = {
-    name: fileName,
-    mimeType: "application/json"
-  };
-
+  const metadata = { name: fileName, mimeType: "application/json" };
   const boundary = "-------314159265358979323846";
   const delimiter = `\r\n--${boundary}\r\n`;
   const closeDelim = `\r\n--${boundary}--`;
@@ -509,21 +481,14 @@ async function uploadJsonToDrive(fileName, jsonText, existingFileId = null) {
 
 async function downloadDriveJsonFile(fileId) {
   const token = await ensureDriveToken();
-
-  const res = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
-    }
-  );
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
 
   if (!res.ok) {
     const errorText = await res.text();
     throw new Error(`Driveからの読込に失敗しました: ${errorText}`);
   }
-
   return await res.json();
 }
 
@@ -534,7 +499,6 @@ async function syncAllDataToDrive() {
   };
 
   const existing = await findDriveFileByName(DRIVE_FILENAME);
-
   return await uploadJsonToDrive(
     DRIVE_FILENAME,
     JSON.stringify(payload, null, 2),
@@ -544,9 +508,7 @@ async function syncAllDataToDrive() {
 
 async function loadAllDataFromDrive() {
   const existing = await findDriveFileByName(DRIVE_FILENAME);
-  if (!existing) {
-    return false;
-  }
+  if (!existing) return false;
 
   const json = await downloadDriveJsonFile(existing.id);
   const driveRecords = ensureArray(json.records).map((r) => normalizeRecord(r, r?.source || "drive"));
@@ -554,7 +516,6 @@ async function loadAllDataFromDrive() {
   state.userRecords = driveRecords;
   saveUserRecords();
   syncRecords();
-
   return true;
 }
 
@@ -567,7 +528,6 @@ function buildBusinessModelQuery(record) {
     extractKeywords(record).slice(0, 3).join(" "),
     "ビジネスモデル 事例"
   ].filter(Boolean);
-
   return parts.join(" ");
 }
 
@@ -579,7 +539,6 @@ function buildTrendQuery(record) {
     "トレンド 最新",
     String(year)
   ].filter(Boolean);
-
   return parts.join(" ");
 }
 
@@ -587,7 +546,6 @@ async function runGoogleSearch(query, num = 5) {
   if (!query) return [];
 
   const url = `https://www.googleapis.com/customsearch/v1?key=${encodeURIComponent(GOOGLE_API_KEY)}&cx=${encodeURIComponent(GOOGLE_CX)}&q=${encodeURIComponent(query)}&num=${num}`;
-
   const res = await fetch(url);
   const data = await res.json();
 
@@ -643,7 +601,6 @@ function getWebCacheKey(type, record) {
 async function searchWebModelsOnly() {
   const draft = getDraftRecord();
   const hasInput = draft.industry || draft.topic || draft.issue;
-
   if (!hasInput) {
     alert("業種・相談テーマ・相談内容のいずれかを入力してください。");
     return;
@@ -673,18 +630,14 @@ async function searchWebModelsOnly() {
     state.webModelResults = [];
     state.webQueryInfo = "";
     refreshAIProposal();
-
     const boxAfter = getEl("webModelsArea");
-    if (boxAfter) {
-      boxAfter.innerHTML = `<div class="muted">${escapeHtml(error.message || "Web検索に失敗しました。")}</div>`;
-    }
+    if (boxAfter) boxAfter.innerHTML = `<div class="muted">${escapeHtml(error.message || "Web検索に失敗しました。")}</div>`;
   }
 }
 
 async function searchWebTrendsOnly() {
   const draft = getDraftRecord();
   const hasInput = draft.industry || draft.topic || draft.issue;
-
   if (!hasInput) {
     alert("業種・相談テーマ・相談内容のいずれかを入力してください。");
     return;
@@ -717,36 +670,23 @@ async function searchWebTrendsOnly() {
     console.error(error);
     state.webTrendResults = [];
     refreshAIProposal();
-
     const boxAfter = getEl("webTrendsArea");
-    if (boxAfter) {
-      boxAfter.innerHTML = `<div class="muted">${escapeHtml(error.message || "Web検索に失敗しました。")}</div>`;
-    }
+    if (boxAfter) boxAfter.innerHTML = `<div class="muted">${escapeHtml(error.message || "Web検索に失敗しました。")}</div>`;
   }
 }
 
 function bindWebSearchButtons() {
   const modelBtn = getEl("searchWebModelsBtn");
-  if (modelBtn) {
-    modelBtn.addEventListener("click", async () => {
-      await searchWebModelsOnly();
-    });
-  }
+  if (modelBtn) modelBtn.addEventListener("click", async () => { await searchWebModelsOnly(); });
 
   const trendBtn = getEl("searchWebTrendsBtn");
-  if (trendBtn) {
-    trendBtn.addEventListener("click", async () => {
-      await searchWebTrendsOnly();
-    });
-  }
+  if (trendBtn) trendBtn.addEventListener("click", async () => { await searchWebTrendsOnly(); });
 
   const clearBtn = getEl("clearWebSearchBtn");
-  if (clearBtn) {
-    clearBtn.addEventListener("click", () => {
-      clearWebSearchResults();
-      refreshAIProposal();
-    });
-  }
+  if (clearBtn) clearBtn.addEventListener("click", () => {
+    clearWebSearchResults();
+    refreshAIProposal();
+  });
 }
 
 /* ===== 音声入力 ===== */
@@ -777,15 +717,11 @@ function appendTextToField(fieldId, text) {
   if (!el) return;
   const current = el.value.trim();
   el.value = current ? `${current}\n${text}` : text;
-
-  const event = new Event("input", { bubbles: true });
-  el.dispatchEvent(event);
+  el.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 function stopSpeechInput() {
-  if (speechState.recognition) {
-    speechState.recognition.stop();
-  }
+  if (speechState.recognition) speechState.recognition.stop();
   speechState.isListening = false;
   speechState.activeTargetId = null;
   updateSpeechButtons();
@@ -793,7 +729,6 @@ function stopSpeechInput() {
 
 function startSpeechInput(targetId) {
   const SpeechRecognitionClass = getSpeechRecognitionClass();
-
   if (!SpeechRecognitionClass) {
     alert("このブラウザでは音声入力に対応していません。Chromeでお試しください。");
     return;
@@ -803,10 +738,7 @@ function startSpeechInput(targetId) {
     stopSpeechInput();
     return;
   }
-
-  if (speechState.isListening) {
-    stopSpeechInput();
-  }
+  if (speechState.isListening) stopSpeechInput();
 
   const recognition = new SpeechRecognitionClass();
   recognition.lang = "ja-JP";
@@ -824,11 +756,8 @@ function startSpeechInput(targetId) {
     let interimTranscript = "";
     for (let i = event.resultIndex; i < event.results.length; i += 1) {
       const transcript = event.results[i][0].transcript;
-      if (event.results[i].isFinal) {
-        finalTranscript += transcript;
-      } else {
-        interimTranscript += transcript;
-      }
+      if (event.results[i].isFinal) finalTranscript += transcript;
+      else interimTranscript += transcript;
     }
 
     const previewEl = getEl("speechStatus");
@@ -851,13 +780,9 @@ function startSpeechInput(targetId) {
   };
 
   recognition.onend = () => {
-    if (finalTranscript.trim()) {
-      appendTextToField(targetId, finalTranscript.trim());
-    }
-
+    if (finalTranscript.trim()) appendTextToField(targetId, finalTranscript.trim());
     const status = getEl("speechStatus");
     if (status) status.textContent = "";
-
     speechState.isListening = false;
     speechState.activeTargetId = null;
     updateSpeechButtons();
@@ -873,13 +798,13 @@ function renderSimilarCaseList(similars) {
     return `<div class="muted">類似事例はまだ見つかっていません。</div>`;
   }
 
-  if (!state.selectedSimilarId || !similars.some(x => x.id === state.selectedSimilarId)) {
+  if (!state.selectedSimilarId || !similars.some((x) => x.id === state.selectedSimilarId)) {
     state.selectedSimilarId = similars[0].id;
   }
 
   return `
     <div class="case-list">
-      ${similars.map(item => `
+      ${similars.map((item) => `
         <button
           type="button"
           class="case-button ${item.id === state.selectedSimilarId ? "active" : ""}"
@@ -917,8 +842,7 @@ function renderSimilarCaseDetail(record) {
 
 function renderAIProposal() {
   const draft = getDraftRecord();
-  const hasInput =
-    draft.companyName || draft.industry || draft.topic || draft.issue || draft.notes || draft.advice;
+  const hasInput = draft.companyName || draft.industry || draft.topic || draft.issue || draft.notes || draft.advice;
 
   if (!hasInput) {
     return `
@@ -935,7 +859,7 @@ function renderAIProposal() {
   const fabe = buildFABE(draft);
   const advice = buildAdviceDirections(draft);
   const similars = findSimilarRecords(draft, 5);
-  const selected = similars.find(x => x.id === state.selectedSimilarId) || similars[0] || null;
+  const selected = similars.find((x) => x.id === state.selectedSimilarId) || similars[0] || null;
   const nextActions = buildNextActions(draft);
 
   return `
@@ -947,7 +871,7 @@ function renderAIProposal() {
 
       <div class="ai-block">
         <h4>② リソース抽出</h4>
-        <ul>${resourcePoints.map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul>
+        <ul>${resourcePoints.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul>
       </div>
 
       <div class="ai-block">
@@ -960,7 +884,7 @@ function renderAIProposal() {
 
       <div class="ai-block">
         <h4>④ 助言方向性</h4>
-        <ul>${advice.map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul>
+        <ul>${advice.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul>
       </div>
 
       <div class="ai-block">
@@ -980,32 +904,22 @@ function renderAIProposal() {
           <button id="searchWebTrendsBtn" type="button" class="secondary">トレンド検索</button>
           <button id="clearWebSearchBtn" type="button" class="secondary">検索結果クリア</button>
         </div>
-        <div id="webQueryInfo" class="muted" style="margin-bottom:8px;">
-          ${escapeHtml(state.webQueryInfo || "")}
-        </div>
+        <div id="webQueryInfo" class="muted" style="margin-bottom:8px;">${escapeHtml(state.webQueryInfo || "")}</div>
         <div id="webModelsArea">
-          ${
-            state.webModelResults.length
-              ? renderWebSearchItems(state.webModelResults)
-              : `<div class="muted">ボタンを押すと表示します。</div>`
-          }
+          ${state.webModelResults.length ? renderWebSearchItems(state.webModelResults) : `<div class="muted">ボタンを押すと表示します。</div>`}
         </div>
       </div>
 
       <div class="ai-block">
         <h4>⑥-2 Webトレンド</h4>
         <div id="webTrendsArea">
-          ${
-            state.webTrendResults.length
-              ? renderWebSearchItems(state.webTrendResults)
-              : `<div class="muted">ボタンを押すと表示します。</div>`
-          }
+          ${state.webTrendResults.length ? renderWebSearchItems(state.webTrendResults) : `<div class="muted">ボタンを押すと表示します。</div>`}
         </div>
       </div>
 
       <div class="ai-block">
         <h4>⑦ 次の一手</h4>
-        <ul>${nextActions.map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul>
+        <ul>${nextActions.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul>
       </div>
     </div>
   `;
@@ -1017,17 +931,15 @@ function getCompanyHistory(companyName) {
   const name = safeText(companyName);
   if (!name) return [];
   return state.userRecords
-    .filter(r => safeText(r.companyName) === name)
+    .filter((r) => safeText(r.companyName) === name)
     .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
 }
 
 function renderHistoryOptions(companyName) {
   const items = getCompanyHistory(companyName);
-  if (!items.length) {
-    return `<option value="">履歴なし</option>`;
-  }
+  if (!items.length) return `<option value="">履歴なし</option>`;
 
-  return `<option value="">選択してください</option>` + items.map(item => {
+  return `<option value="">選択してください</option>` + items.map((item) => {
     const label = [
       item.updatedAt ? new Date(item.updatedAt).toLocaleString("ja-JP") : "",
       item.topic || "",
@@ -1039,11 +951,10 @@ function renderHistoryOptions(companyName) {
 }
 
 function loadMainRecordToForm(recordId) {
-  const record = state.userRecords.find(r => r.id === recordId);
+  const record = state.userRecords.find((r) => r.id === recordId);
   if (!record) return;
 
   state.editingRecordId = record.id;
-
   getEl("mainCompanyName").value = record.companyName || "";
   getEl("mainIndustry").value = record.industry || "";
   getEl("mainTopic").value = record.topic || "";
@@ -1067,7 +978,7 @@ function refreshHistorySelect() {
 
   historySelect.innerHTML = renderHistoryOptions(companyName);
 
-  if (state.editingRecordId && getCompanyHistory(companyName).some(x => x.id === state.editingRecordId)) {
+  if (state.editingRecordId && getCompanyHistory(companyName).some((x) => x.id === state.editingRecordId)) {
     historySelect.value = state.editingRecordId;
   } else {
     historySelect.value = "";
@@ -1099,16 +1010,12 @@ function renderMainPage() {
 
           <div>
             <label for="mainIndustry">業種</label>
-            <select id="mainIndustry">
-              ${selectOptions(MASTER.industries)}
-            </select>
+            <select id="mainIndustry">${selectOptions(MASTER.industries)}</select>
           </div>
 
           <div>
             <label for="mainTopic">相談テーマ</label>
-            <select id="mainTopic">
-              ${selectOptions(MASTER.topics)}
-            </select>
+            <select id="mainTopic">${selectOptions(MASTER.topics)}</select>
           </div>
 
           <div>
@@ -1165,9 +1072,7 @@ function renderMainPage() {
 
       <div class="card">
         <h2>AI提案</h2>
-        <div id="aiProposalArea">
-          ${renderAIProposal()}
-        </div>
+        <div id="aiProposalArea">${renderAIProposal()}</div>
       </div>
     </div>
   `;
@@ -1243,30 +1148,19 @@ function refreshAIProposal() {
 
 function bindMainEvents() {
   [
-    "mainCompanyName",
-    "mainIndustry",
-    "mainTopic",
-    "mainIssue",
-    "mainNotes",
-    "mainAdvice",
-    "mainResult",
-    "mainNextAction",
-    "mainMeetingLog"
-  ].forEach(id => {
+    "mainCompanyName", "mainIndustry", "mainTopic", "mainIssue", "mainNotes",
+    "mainAdvice", "mainResult", "mainNextAction", "mainMeetingLog"
+  ].forEach((id) => {
     const el = getEl(id);
     if (!el) return;
 
     el.addEventListener("input", () => {
-      if (id === "mainCompanyName") {
-        refreshHistorySelect();
-      }
+      if (id === "mainCompanyName") refreshHistorySelect();
       refreshAIProposal();
     });
 
     el.addEventListener("change", () => {
-      if (id === "mainCompanyName") {
-        refreshHistorySelect();
-      }
+      if (id === "mainCompanyName") refreshHistorySelect();
       refreshAIProposal();
     });
   });
@@ -1304,9 +1198,7 @@ function bindMainEvents() {
   if (saveBtn) saveBtn.addEventListener("click", handleSaveMainRecord);
 
   const clearBtn = getEl("clearMainBtn");
-  if (clearBtn) {
-    clearBtn.addEventListener("click", clearMainForm);
-  }
+  if (clearBtn) clearBtn.addEventListener("click", clearMainForm);
 
   const logBtn = getEl("generateMeetingLogBtn");
   if (logBtn) {
@@ -1332,36 +1224,12 @@ function bindMainEvents() {
 }
 
 function bindSimilarCaseButtons() {
-  document.querySelectorAll(".case-button").forEach(btn => {
+  document.querySelectorAll(".case-button").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.selectedSimilarId = btn.dataset.caseId || null;
       refreshAIProposal();
     });
   });
-}
-
-function bindWebSearchButtons() {
-  const modelBtn = getEl("searchWebModelsBtn");
-  if (modelBtn) {
-    modelBtn.addEventListener("click", async () => {
-      await searchWebModelsOnly();
-    });
-  }
-
-  const trendBtn = getEl("searchWebTrendsBtn");
-  if (trendBtn) {
-    trendBtn.addEventListener("click", async () => {
-      await searchWebTrendsOnly();
-    });
-  }
-
-  const clearBtn = getEl("clearWebSearchBtn");
-  if (clearBtn) {
-    clearBtn.addEventListener("click", () => {
-      clearWebSearchResults();
-      refreshAIProposal();
-    });
-  }
 }
 
 function bindSubEvents() {
@@ -1371,13 +1239,11 @@ function bindSubEvents() {
   const clearBtn = getEl("clearSubBtn");
   if (clearBtn) {
     clearBtn.addEventListener("click", () => {
-      [
-        "subCompanyName", "subIndustry", "subCategory", "subTopic",
-        "subRecordType", "subContent", "subTags"
-      ].forEach(id => {
-        const el = getEl(id);
-        if (el) el.value = "";
-      });
+      ["subCompanyName", "subIndustry", "subCategory", "subTopic", "subRecordType", "subContent", "subTags"]
+        .forEach((id) => {
+          const el = getEl(id);
+          if (el) el.value = "";
+        });
       const msg = getEl("subSaveMessage");
       if (msg) msg.textContent = "";
     });
@@ -1388,16 +1254,9 @@ function bindSubEvents() {
 
 function clearMainForm() {
   [
-    "mainCompanyName",
-    "mainIndustry",
-    "mainTopic",
-    "mainIssue",
-    "mainNotes",
-    "mainAdvice",
-    "mainResult",
-    "mainNextAction",
-    "mainMeetingLog"
-  ].forEach(id => {
+    "mainCompanyName", "mainIndustry", "mainTopic", "mainIssue", "mainNotes",
+    "mainAdvice", "mainResult", "mainNextAction", "mainMeetingLog"
+  ].forEach((id) => {
     const el = getEl(id);
     if (el) el.value = "";
   });
@@ -1460,7 +1319,7 @@ async function handleSaveMainRecord() {
     updatedAt: now
   }, "main");
 
-  const existingIndex = state.userRecords.findIndex(r => r.id === record.id);
+  const existingIndex = state.userRecords.findIndex((r) => r.id === record.id);
 
   if (existingIndex >= 0) {
     const previous = state.userRecords[existingIndex];
@@ -1553,12 +1412,12 @@ function initTabs() {
   const mainPage = getEl("mainPage");
   const subPage = getEl("subPage");
 
-  buttons.forEach(btn => {
+  buttons.forEach((btn) => {
     btn.addEventListener("click", () => {
       const page = btn.dataset.page;
       state.currentPage = page;
 
-      buttons.forEach(x => x.classList.remove("active"));
+      buttons.forEach((x) => x.classList.remove("active"));
       btn.classList.add("active");
 
       if (mainPage) mainPage.classList.toggle("active", page === "mainPage");
