@@ -4,9 +4,6 @@ const GOOGLE_CLIENT_ID = "143268570956-6gkgv6efumfbqa5kue0mr2u6e2hoqghe.apps.goo
 const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const DRIVE_FILENAME = "keiei_soudan_records.json";
 
-const GOOGLE_API_KEY = "AIzaSyBgLnIp0xtf1U9vi6hSqTMXY7PY7CIOEIk";
-const GOOGLE_CX = "6727bc25a4ebb430d";
-
 const MASTER = {
   industries: [
     "製造", "卸売", "小売", "飲食", "宿泊", "サービス", "建設", "不動産", "運輸",
@@ -519,14 +516,16 @@ async function loadAllDataFromDrive() {
   return true;
 }
 
-/* ===== Web検索 ===== */
+/* ===== Web検索（別タブでGoogleを開く方式） ===== */
 
 function buildBusinessModelQuery(record) {
+  const keywordText = extractKeywords(record).slice(0, 3).join(" ");
   const parts = [
     record.industry,
     record.topic,
-    extractKeywords(record).slice(0, 3).join(" "),
-    "ビジネスモデル 事例"
+    keywordText,
+    "ビジネスモデル",
+    "事例"
   ].filter(Boolean);
   return parts.join(" ");
 }
@@ -536,34 +535,26 @@ function buildTrendQuery(record) {
   const parts = [
     record.industry,
     record.topic,
-    "トレンド 最新",
+    "トレンド",
+    "市場動向",
+    "最新",
     String(year)
   ].filter(Boolean);
   return parts.join(" ");
 }
 
-async function runGoogleSearch(query, num = 5) {
-  if (!query) return [];
-
-  const url = `https://www.googleapis.com/customsearch/v1?key=${encodeURIComponent(GOOGLE_API_KEY)}&cx=${encodeURIComponent(GOOGLE_CX)}&q=${encodeURIComponent(query)}&num=${num}`;
-  const res = await fetch(url);
-  const data = await res.json();
-
-  if (!res.ok) {
-    const message = data?.error?.message || "Web検索に失敗しました。";
-    throw new Error(message);
+function openGoogleSearch(query) {
+  if (!query || !query.trim()) {
+    alert("検索キーワードが不足しています。");
+    return;
   }
-
-  return ensureArray(data.items).map((item) => ({
-    title: item.title || "",
-    link: item.link || "",
-    snippet: item.snippet || ""
-  }));
+  const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 function renderWebSearchItems(items) {
   if (!items.length) {
-    return `<div class="muted">該当するWeb情報が見つかりませんでした。</div>`;
+    return `<div class="muted">検索は別タブでGoogleを開く方式です。</div>`;
   }
 
   return `
@@ -587,18 +578,7 @@ function clearWebSearchResults() {
   state.webQueryInfo = "";
 }
 
-function getWebCacheKey(type, record) {
-  return JSON.stringify({
-    type,
-    industry: record.industry,
-    topic: record.topic,
-    issue: record.issue,
-    advice: record.advice,
-    notes: record.notes
-  });
-}
-
-async function searchWebModelsOnly() {
+function searchWebModelsOnly() {
   const draft = getDraftRecord();
   const hasInput = draft.industry || draft.topic || draft.issue;
   if (!hasInput) {
@@ -607,35 +587,13 @@ async function searchWebModelsOnly() {
   }
 
   const modelQuery = buildBusinessModelQuery(draft);
-  const cacheKey = getWebCacheKey("model", draft);
-
-  if (state.webResearchCache[cacheKey]) {
-    state.webModelResults = state.webResearchCache[cacheKey];
-    state.webQueryInfo = `類似モデル検索語：${modelQuery}`;
-    refreshAIProposal();
-    return;
-  }
-
-  const box = getEl("webModelsArea");
-  if (box) box.innerHTML = `<div class="muted">検索中...</div>`;
-
-  try {
-    const models = await runGoogleSearch(modelQuery, 5);
-    state.webResearchCache[cacheKey] = models;
-    state.webModelResults = models;
-    state.webQueryInfo = `類似モデル検索語：${modelQuery}`;
-    refreshAIProposal();
-  } catch (error) {
-    console.error(error);
-    state.webModelResults = [];
-    state.webQueryInfo = "";
-    refreshAIProposal();
-    const boxAfter = getEl("webModelsArea");
-    if (boxAfter) boxAfter.innerHTML = `<div class="muted">${escapeHtml(error.message || "Web検索に失敗しました。")}</div>`;
-  }
+  state.webQueryInfo = `類似モデル検索語：${modelQuery}`;
+  state.webModelResults = [];
+  refreshAIProposal();
+  openGoogleSearch(modelQuery);
 }
 
-async function searchWebTrendsOnly() {
+function searchWebTrendsOnly() {
   const draft = getDraftRecord();
   const hasInput = draft.industry || draft.topic || draft.issue;
   if (!hasInput) {
@@ -644,49 +602,36 @@ async function searchWebTrendsOnly() {
   }
 
   const trendQuery = buildTrendQuery(draft);
-  const cacheKey = getWebCacheKey("trend", draft);
-
-  if (state.webResearchCache[cacheKey]) {
-    state.webTrendResults = state.webResearchCache[cacheKey];
-    state.webQueryInfo = state.webQueryInfo
-      ? `${state.webQueryInfo} / トレンド検索語：${trendQuery}`
-      : `トレンド検索語：${trendQuery}`;
-    refreshAIProposal();
-    return;
-  }
-
-  const box = getEl("webTrendsArea");
-  if (box) box.innerHTML = `<div class="muted">検索中...</div>`;
-
-  try {
-    const trends = await runGoogleSearch(trendQuery, 5);
-    state.webResearchCache[cacheKey] = trends;
-    state.webTrendResults = trends;
-    state.webQueryInfo = state.webQueryInfo
-      ? `${state.webQueryInfo} / トレンド検索語：${trendQuery}`
-      : `トレンド検索語：${trendQuery}`;
-    refreshAIProposal();
-  } catch (error) {
-    console.error(error);
-    state.webTrendResults = [];
-    refreshAIProposal();
-    const boxAfter = getEl("webTrendsArea");
-    if (boxAfter) boxAfter.innerHTML = `<div class="muted">${escapeHtml(error.message || "Web検索に失敗しました。")}</div>`;
-  }
+  state.webQueryInfo = state.webQueryInfo
+    ? `${state.webQueryInfo} / トレンド検索語：${trendQuery}`
+    : `トレンド検索語：${trendQuery}`;
+  state.webTrendResults = [];
+  refreshAIProposal();
+  openGoogleSearch(trendQuery);
 }
 
 function bindWebSearchButtons() {
   const modelBtn = getEl("searchWebModelsBtn");
-  if (modelBtn) modelBtn.addEventListener("click", async () => { await searchWebModelsOnly(); });
+  if (modelBtn) {
+    modelBtn.addEventListener("click", () => {
+      searchWebModelsOnly();
+    });
+  }
 
   const trendBtn = getEl("searchWebTrendsBtn");
-  if (trendBtn) trendBtn.addEventListener("click", async () => { await searchWebTrendsOnly(); });
+  if (trendBtn) {
+    trendBtn.addEventListener("click", () => {
+      searchWebTrendsOnly();
+    });
+  }
 
   const clearBtn = getEl("clearWebSearchBtn");
-  if (clearBtn) clearBtn.addEventListener("click", () => {
-    clearWebSearchResults();
-    refreshAIProposal();
-  });
+  if (clearBtn) {
+    clearBtn.addEventListener("click", () => {
+      clearWebSearchResults();
+      refreshAIProposal();
+    });
+  }
 }
 
 /* ===== 音声入力 ===== */
@@ -906,14 +851,14 @@ function renderAIProposal() {
         </div>
         <div id="webQueryInfo" class="muted" style="margin-bottom:8px;">${escapeHtml(state.webQueryInfo || "")}</div>
         <div id="webModelsArea">
-          ${state.webModelResults.length ? renderWebSearchItems(state.webModelResults) : `<div class="muted">ボタンを押すと表示します。</div>`}
+          <div class="muted">「類似モデル検索」を押すと、別タブでGoogle検索を開きます。</div>
         </div>
       </div>
 
       <div class="ai-block">
         <h4>⑥-2 Webトレンド</h4>
         <div id="webTrendsArea">
-          ${state.webTrendResults.length ? renderWebSearchItems(state.webTrendResults) : `<div class="muted">ボタンを押すと表示します。</div>`}
+          <div class="muted">「トレンド検索」を押すと、別タブでGoogle検索を開きます。</div>
         </div>
       </div>
 
