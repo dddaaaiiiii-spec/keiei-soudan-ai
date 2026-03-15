@@ -295,15 +295,131 @@ function buildResourcePoints(record) {
   return items.slice(0, 5);
 }
 
+/* ===== 事業構造整理 ===== */
+
+function inferBusinessStructure(record) {
+  const text = [
+    record.industry,
+    record.topic,
+    record.issue,
+    record.notes,
+    record.advice,
+    record.result,
+    record.memo,
+    record.content,
+    record.tags
+  ].join(" ").toLowerCase();
+
+  let businessType = record.industry ? `${record.industry}事業` : "事業内容の整理が必要";
+  let offer = "提供商品・サービスの具体化が必要";
+  let customer = "主要顧客の明確化が必要";
+  let revenueModel = "収益構造の整理が必要";
+  let strengths = "強み・差別化ポイントの整理が必要";
+
+  if (/宿泊|ホテル|旅館|民宿|ゲストハウス/.test(text)) {
+    businessType = "宿泊事業";
+    offer = "宿泊体験・滞在価値・地域滞在の機会を提供";
+    customer = "観光客、出張客、週末旅行層";
+    revenueModel = "宿泊料金を中心に、付帯サービスや体験商品の追加販売";
+    strengths = "立地、滞在体験、食事、接客、季節プランの差別化が重要";
+  } else if (/飲食|レストラン|居酒屋|カフェ|食堂/.test(text)) {
+    businessType = "飲食事業";
+    offer = "食事・空間・接客を組み合わせた飲食体験を提供";
+    customer = "地域住民、来店客、観光客、リピーター候補";
+    revenueModel = "店内飲食、テイクアウト、物販、コース・イベント販売";
+    strengths = "看板商品、世界観、立地、接客、写真映え、口コミ導線";
+  } else if (/小売|販売|物販|店舗|ec|通販/.test(text)) {
+    businessType = "小売・物販事業";
+    offer = "商品選定や見せ方を通じて購買価値を提供";
+    customer = "来店客、既存顧客、EC利用者、ギフト需要";
+    revenueModel = "商品の販売差益、セット販売、定期購入、関連商品の追加販売";
+    strengths = "品揃え、専門性、提案力、ストーリー、独自仕入れ";
+  } else if (/製造|加工|工場|OEM|ODM/.test(text)) {
+    businessType = "製造事業";
+    offer = "製品・部品・加工技術を提供";
+    customer = "法人取引先、メーカー、卸先、特定業界の企業";
+    revenueModel = "受注生産、継続取引、OEM供給、加工賃";
+    strengths = "技術力、品質、対応力、小ロット、多品種、短納期";
+  } else if (/美容|サロン|整体|エステ|治療院/.test(text)) {
+    businessType = "施術・美容サービス事業";
+    offer = "施術やケアによる身体・美容・気分面の価値を提供";
+    customer = "個人顧客、継続来店見込み客、悩みを持つ特定層";
+    revenueModel = "単発利用、回数券、定期来店、物販";
+    strengths = "専門性、安心感、結果実感、接客、紹介導線";
+  } else if (/教育|講座|スクール|教室|研修/.test(text)) {
+    businessType = "教育・講座事業";
+    offer = "知識習得、技術習得、変化実感の機会を提供";
+    customer = "学びたい個人、保護者、企業、初心者層";
+    revenueModel = "受講料、継続講座、会員制、教材販売";
+    strengths = "教え方、専門性、成果実感、継続性、世界観";
+  } else if (/士業|コンサル|支援|アドバイス/.test(text)) {
+    businessType = "専門サービス事業";
+    offer = "専門知識を活かした課題解決支援を提供";
+    customer = "課題を抱える事業者、個人、継続支援先";
+    revenueModel = "相談料、顧問契約、スポット支援、成果連動";
+    strengths = "専門性、信頼性、実績、伴走力、提案力";
+  } else if (/観光|体験|ツアー|地域資源/.test(text)) {
+    businessType = "観光・体験事業";
+    offer = "地域資源を活かした体験価値を提供";
+    customer = "観光客、家族、カップル、来訪者";
+    revenueModel = "体験料金、物販、セット販売、予約販売";
+    strengths = "地域性、非日常感、写真映え、季節性、ストーリー";
+  } else if (/it|システム|アプリ|ソフト|web/.test(text)) {
+    businessType = "IT・デジタルサービス事業";
+    offer = "システム・アプリ・Web機能による効率化や利便性を提供";
+    customer = "法人顧客、事業者、利用者、特定業界";
+    revenueModel = "初期導入費、月額課金、保守契約、追加開発";
+    strengths = "機能性、使いやすさ、サポート、専門性、改善速度";
+  }
+
+  if (record.topic === "集客" || record.topic === "売上拡大") {
+    customer = `${customer}。特に「誰を増やしたいか」の整理が重要`;
+  }
+  if (record.topic === "新商品" || record.topic === "新サービス") {
+    offer = `${offer}。新しい提供価値の設計余地あり`;
+  }
+  if (record.topic === "値上げ" || record.topic === "利益改善") {
+    revenueModel = `${revenueModel}。単価・粗利・商品構成の見直し余地あり`;
+  }
+  if (record.topic === "ブランディング" || record.topic === "強み整理") {
+    strengths = `${strengths}。選ばれる理由の言語化が重要`;
+  }
+
+  return {
+    businessType,
+    offer,
+    customer,
+    revenueModel,
+    strengths
+  };
+}
+
 function buildFABE(record) {
-  const feature = record.issue || "現状の相談内容を整理中";
-  const advantage = record.industry
-    ? `${record.industry}ならではの提供価値を整理できる`
-    : "提供内容の特徴整理が必要";
-  const benefit = record.topic
-    ? `「${record.topic}」に対して顧客メリットへ変換できる`
-    : "顧客メリットへの言い換えが必要";
-  const evidence = record.result || record.notes || record.memo || "実績・顧客の声・具体例の補強が必要";
+  const structure = inferBusinessStructure(record);
+
+  let feature = structure.offer;
+  let advantage = structure.strengths;
+  let benefit = "顧客にとっての利用価値の具体化が必要";
+  let evidence = record.result || record.notes || record.memo || "実績・顧客の声・具体事例の補強が必要";
+
+  if (record.topic === "集客") {
+    benefit = "来店・利用のきっかけを作り、比較時に選ばれやすくなる";
+  } else if (record.topic === "売上拡大") {
+    benefit = "利用頻度・客単価・継続率の向上につながる";
+  } else if (record.topic === "販路開拓") {
+    benefit = "新しい顧客接点を増やし、売上源の分散につながる";
+  } else if (record.topic === "新商品" || record.topic === "新サービス") {
+    benefit = "既存顧客の新たな需要を取り込み、比較優位を作りやすい";
+  } else if (record.topic === "値上げ" || record.topic === "利益改善") {
+    benefit = "価格ではなく価値で選ばれる状態を作り、粗利改善につながる";
+  } else if (record.topic === "リピート") {
+    benefit = "再来店・再購入の理由を作り、安定収益化しやすくなる";
+  } else if (/夏|季節|旬/.test([record.issue, record.notes, record.memo].join(" "))) {
+    benefit = "季節需要に合わせた訴求で、利用理由を作りやすい";
+  } else {
+    benefit = "顧客が選ぶ理由を明確にし、比較時の優位性につながる";
+  }
+
   return { feature, advantage, benefit, evidence };
 }
 
@@ -337,7 +453,7 @@ function buildAdviceDirections(record) {
     results.push("仕事内容の魅力をベネフィットで表現する");
     results.push("教育しやすい受入設計を先に考える");
   }
-  if (industry === "観光" || industry === "飲食" || industry === "小売") {
+  if (industry === "観光" || industry === "飲食" || industry === "小売" || industry === "宿泊") {
     results.push("体験価値・写真映え・口コミ導線を意識する");
   }
   if (results.length === 0) {
@@ -550,26 +666,6 @@ function openGoogleSearch(query) {
   }
   const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
   window.open(url, "_blank", "noopener,noreferrer");
-}
-
-function renderWebSearchItems(items) {
-  if (!items.length) {
-    return `<div class="muted">検索は別タブでGoogleを開く方式です。</div>`;
-  }
-
-  return `
-    <div style="display:grid;gap:10px;">
-      ${items.map((item) => `
-        <div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;background:#fff;">
-          <div style="font-weight:700;">${escapeHtml(item.title)}</div>
-          <div class="muted" style="margin-top:6px;">${escapeHtml(item.snippet)}</div>
-          <div style="margin-top:8px;">
-            <a href="${escapeHtml(item.link)}" target="_blank" rel="noopener noreferrer">記事を見る</a>
-          </div>
-        </div>
-      `).join("")}
-    </div>
-  `;
 }
 
 function clearWebSearchResults() {
@@ -785,6 +881,18 @@ function renderSimilarCaseDetail(record) {
   `;
 }
 
+function renderBusinessStructure(structure) {
+  return `
+    <div class="detail-grid">
+      <div><strong>事業タイプ</strong><br>${nl2br(structure.businessType)}</div>
+      <div><strong>提供価値</strong><br>${nl2br(structure.offer)}</div>
+      <div><strong>主な顧客</strong><br>${nl2br(structure.customer)}</div>
+      <div><strong>収益構造</strong><br>${nl2br(structure.revenueModel)}</div>
+      <div><strong>強み・差別化</strong><br>${nl2br(structure.strengths)}</div>
+    </div>
+  `;
+}
+
 function renderAIProposal() {
   const draft = getDraftRecord();
   const hasInput = draft.companyName || draft.industry || draft.topic || draft.issue || draft.notes || draft.advice;
@@ -794,12 +902,13 @@ function renderAIProposal() {
       <div class="ai-section">
         <div class="ai-block">
           <h4>AI提案</h4>
-          <div class="muted">左側に入力すると、ここに相談整理・FABE・助言方向性・類似事例が表示されます。</div>
+          <div class="muted">左側に入力すると、ここに相談整理・事業構造整理・FABE・助言方向性・類似事例が表示されます。</div>
         </div>
       </div>
     `;
   }
 
+  const structure = inferBusinessStructure(draft);
   const resourcePoints = buildResourcePoints(draft);
   const fabe = buildFABE(draft);
   const advice = buildAdviceDirections(draft);
@@ -815,12 +924,17 @@ function renderAIProposal() {
       </div>
 
       <div class="ai-block">
-        <h4>② リソース抽出</h4>
+        <h4>② 事業構造整理</h4>
+        ${renderBusinessStructure(structure)}
+      </div>
+
+      <div class="ai-block">
+        <h4>③ リソース抽出</h4>
         <ul>${resourcePoints.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul>
       </div>
 
       <div class="ai-block">
-        <h4>③ FABE整理</h4>
+        <h4>④ FABE整理</h4>
         <div><strong>F：</strong>${escapeHtml(fabe.feature)}</div>
         <div><strong>A：</strong>${escapeHtml(fabe.advantage)}</div>
         <div><strong>B：</strong>${escapeHtml(fabe.benefit)}</div>
@@ -828,12 +942,12 @@ function renderAIProposal() {
       </div>
 
       <div class="ai-block">
-        <h4>④ 助言方向性</h4>
+        <h4>⑤ 助言方向性</h4>
         <ul>${advice.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul>
       </div>
 
       <div class="ai-block">
-        <h4>⑤ 類似事例</h4>
+        <h4>⑥ 類似事例</h4>
         ${renderSimilarCaseList(similars)}
       </div>
 
@@ -843,7 +957,7 @@ function renderAIProposal() {
       </div>
 
       <div class="ai-block">
-        <h4>⑥ Web類似モデル</h4>
+        <h4>⑦ Web類似モデル</h4>
         <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px;">
           <button id="searchWebModelsBtn" type="button" class="secondary">類似モデル検索</button>
           <button id="searchWebTrendsBtn" type="button" class="secondary">トレンド検索</button>
@@ -856,14 +970,14 @@ function renderAIProposal() {
       </div>
 
       <div class="ai-block">
-        <h4>⑥-2 Webトレンド</h4>
+        <h4>⑦-2 Webトレンド</h4>
         <div id="webTrendsArea">
           <div class="muted">「トレンド検索」を押すと、別タブでGoogle検索を開きます。</div>
         </div>
       </div>
 
       <div class="ai-block">
-        <h4>⑦ 次の一手</h4>
+        <h4>⑧ 次の一手</h4>
         <ul>${nextActions.map((x) => `<li>${escapeHtml(x)}</li>`).join("")}</ul>
       </div>
     </div>
